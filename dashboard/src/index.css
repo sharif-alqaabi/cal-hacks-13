@@ -3,41 +3,56 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Dark only. Names follow shadcn so the shadcn and 21st.dev components pick them up. Red (--alert) means
-   "act now" and appears nowhere else; green (--live) is only the connection dot. */
+/* Light and warm: the page is for family checking in, so it should read like a photo album, not a monitor.
+   Names follow shadcn so the shadcn and 21st.dev components pick them up. Red (--alert) means "act now" and
+   appears nowhere else; green (--live) is only the connection dot. */
 :root {
-  color-scheme: dark;
-  --background: #0a0a0b;
-  --foreground: #ededef;
-  --card: #131315;
-  --card-foreground: #ededef;
-  --popover: #131315;
-  --popover-foreground: #ededef;
-  --primary: #ededef;
-  --primary-foreground: #0a0a0b;
-  --secondary: #1a1a1d;
-  --secondary-foreground: #ededef;
-  --muted: #1a1a1d;
-  --muted-foreground: #9a9aa3;
-  --accent: #1f1f23;
-  --accent-foreground: #ededef;
-  --destructive: #ff5a47;
-  --border: rgb(255 255 255 / 0.08);
-  --input: rgb(255 255 255 / 0.12);
-  --ring: #a1a1aa;
-  --raised: #1a1a1d;
-  --border-strong: rgb(255 255 255 / 0.16);
-  --alert: #ff5a47;
-  --live: #3dd68c;
-  --radius: 0.875rem;
-  --header-h: 56px;
+  color-scheme: light;
+  --background: #fdf6ee;
+  --foreground: #2f2a25;
+  --card: #ffffff;
+  --card-foreground: #2f2a25;
+  --popover: #ffffff;
+  --popover-foreground: #2f2a25;
+  --primary: #e0795a;
+  --primary-foreground: #ffffff;
+  --secondary: #f4eee6;
+  --secondary-foreground: #2f2a25;
+  --muted: #f4eee6;
+  --muted-foreground: #85776a;
+  --accent: #f6ece2;
+  --accent-foreground: #2f2a25;
+  --destructive: #d9483b;
+  --border: #eee5da;
+  --input: #e6dccf;
+  --ring: #e0795a;
+  --raised: #f6f0e8;
+  --border-strong: #e2d6c7;
+  --alert: #d9483b;
+  --live: #2fae6b;
+  --radius: 1.25rem;
+  --header-h: 72px;
+  --shadow-soft: 0 1px 2px rgb(80 55 30 / 0.04), 0 8px 24px -12px rgb(80 55 30 / 0.12);
 
-  --place-home: #8fb996;
-  --place-outside: #8aa4c8;
-  --place-store: #d4a95f;
-  --place-office: #a3a3ad;
-  --place-transit: #b39ddb;
-  --place-other: #a3a3ad;
+  --place-home: #4f9a62;
+  --place-outside: #4d82c4;
+  --place-store: #c98a1e;
+  --place-office: #7c7268;
+  --place-transit: #8a6cc9;
+  --place-other: #7c7268;
+
+  /* Soft chips behind each section's icon. */
+  --tint-peach: #fde8df;
+  --tint-sky: #e3eefb;
+  --tint-sage: #e4f2e7;
+  --tint-lilac: #eee8fa;
+  --tint-sun: #fdf1d6;
+  /* The deep tone of each tint, for titles and small labels on top of it. */
+  --ink-peach: #c2543a;
+  --ink-sky: #2f64a8;
+  --ink-sage: #377a49;
+  --ink-lilac: #6a4bb3;
+  --ink-sun: #9c6408;
 }
 
 @theme inline {
@@ -66,7 +81,7 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-xl: calc(var(--radius) + 4px);
-  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --font-sans: 'Nunito', ui-rounded, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
 }
 
 @layer base {
@@ -74,6 +89,8 @@
   html { -webkit-text-size-adjust: 100%; }
   body {
     @apply bg-background text-foreground font-sans antialiased;
+    background-image: radial-gradient(1200px 520px at 10% -10%, #ffe3d3 0%, transparent 60%), radial-gradient(900px 480px at 95% 0%, #e6efff 0%, transparent 55%);
+    background-repeat: no-repeat;
     min-height: 100dvh;
     overflow-x: hidden;
     font-size: 15px;
