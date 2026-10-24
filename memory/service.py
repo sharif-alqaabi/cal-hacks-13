@@ -32,6 +32,7 @@ WORKERS = int(os.getenv("CAPTION_WORKERS", "4"))
 PRUNE_EVERY_S = 3.0  # how often dashboard deletions are picked up; off the /recall path (it cost ~100-260 ms per recall)
 DUP_DIFF = 3.0     # mean grey-level difference (0-255) between 16x16 thumbnails under which a frame is a duplicate
 NOT_SEEN = "I haven't seen that."
+STICKY_S = 120     # a frame captioned "other" this soon after a known place is a close-up there (a wall, a face), not a move
 
 LEAVE = re.compile(r"\bwhen did i (?:leave|left|exit|go out of|head out of|get out of)\b", re.I)
 ARRIVE = re.compile(r"\bwhen did i (?:arrive|reach|get (?:home|back|to)|come (?:home|back|in)|walk in)\b", re.I)
@@ -162,6 +163,7 @@ class Service:
         self.queue: asyncio.Queue = asyncio.Queue(10)
         self.pending = 0                     # frames queued or being captioned; app.py shows it on /health
         self.last_hash: bytes | None = None  # thumbnail of the last frame kept, for duplicate skipping
+        self.last_place: tuple[float, str, str] = (0.0, "other", "")  # (ts, place, place_detail) of the newest captioned frame
         self.tasks: list[asyncio.Task] = []
         self.bg: set[asyncio.Task] = set()
 
@@ -214,6 +216,12 @@ class Service:
     async def _caption(self, ts: float, jpeg_b64: str) -> None:
         scene = scene_of(jpeg_b64)
         cap = await captions.caption(None if scene is not None else jpeg_b64, scene, self._known_people())
+        last_ts, last, last_detail = self.last_place
+        if cap["place"] == "other" and last != "other" and 0 <= ts - last_ts <= STICKY_S:
+            cap["place"] = last
+            cap["place_detail"] = known(cap.get("place_detail")) or last_detail
+        if ts >= last_ts:
+            self.last_place = (ts, cap["place"], known(cap.get("place_detail")))
         mid = self._new_id(ts)
         await self._store({"id": mid, "ts": mid, "caption_json": json.dumps(cap),
                            "thumb_url": self._thumb(mid, jpeg_b64), "place_note": cap["place"]})
@@ -340,6 +348,7 @@ class Service:
         await self.db.call("delete_all")
         await self.index.delete(self.moments)
         self.moments, self.people, self.ids, self.last_hash = [], {}, set(), None
+        self.last_place = (0.0, "other", "")
 
     # -- helpers --------------------------------------------------------------
 

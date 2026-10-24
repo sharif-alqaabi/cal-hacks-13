@@ -60,3 +60,23 @@ python -m tests.fake_glasses --images tests/fixtures/chair_walk  # a folder of J
 python -m tests.fake_glasses --video walk.mp4                 # a video clip
 ```
 Once it's running, type a sentence and press Enter to "say" it, `/ptt` to record from the mic, or `/wav tests/fixtures/audio/keys.wav` to play a recording.
+
+## 5. Demo phrases that always hit their intent
+
+Every phrase below was run through the live router on 2026-10-24 and landed on its intent through Jev, Claude and the keyword fallback. Say them close to word for word. Phrases marked *(slower)* were decided by Claude rather than Jev, about 0.7 s instead of 0.1 s, so prefer the others on stage.
+
+| Intent | What it does | Say |
+|---|---|---|
+| describe | Describes the current view | "What's in front of me?" · "Describe what's around me." · "What do you see in front of me?" |
+| signal | Reads a pedestrian signal | "Is the walk sign on?" · "Can I cross at this crosswalk?" · "What color is the traffic light?" |
+| remember | Saves a person or a fact with the current frame | "This is my friend Kevin." · "Meet my friend Sam." · "Remember that my keys are in the top drawer." |
+| recall | Answers from memory | "Where did I put my keys?" · "What was Kevin wearing?" · "Where are my glasses?" · "When did I leave home?" *(slower)* |
+| lost | Alerts the family dashboard | "I'm lost." · "Help me, I'm lost." · "I need help." |
+| browser | Starts a laptop/web task | "Email my mom that I'm running late." · "Send an email to Sam saying I'll be there soon." · "Look up the hours for the nearest pharmacy." |
+| task | Work mode item check | "Is this the right item?" · "Check this against the order." · "Next item." *(slower)* |
+| confirm | Answers a waiting draft | "Yes, send it." · "No, cancel." |
+
+Tips:
+- Introduce a person ("This is my friend Kevin.") while they are in view, before asking what they wore. Recall only knows people who were introduced.
+- Hold an object in view for about 5 seconds before asking where it is, so a captioned frame catches it.
+- Keep the words help, walk and light out of other requests, and email, send and search out of describe questions: the keyword fallback checks those intents first.
