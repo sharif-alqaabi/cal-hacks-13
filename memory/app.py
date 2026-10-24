@@ -6,6 +6,7 @@ Test mode: MEMORY_TEST_SCENES=1 reads scene text from mock JPEGs, MEMORY_ALLOW_R
 import logging
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Literal, Optional
 
 from fastapi import FastAPI, HTTPException, Response
@@ -121,3 +122,10 @@ async def reset():
         raise HTTPException(403, "set MEMORY_ALLOW_RESET=1 to enable /reset")
     await svc().reset()
     return OkResp(ok=True)
+
+
+# The family dashboard (built with `npm run build` in dashboard/). Mounted last so it never shadows an API route;
+# served from here so the page and the thumbnails share one origin.
+DASHBOARD_DIST = Path(__file__).resolve().parent.parent / "dashboard" / "dist"
+if DASHBOARD_DIST.is_dir():
+    app.mount("/", StaticFiles(directory=DASHBOARD_DIST, html=True), name="dashboard")

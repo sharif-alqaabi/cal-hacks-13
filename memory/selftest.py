@@ -56,6 +56,7 @@ def check_strict(schema: dict, path: str) -> None:
 def test_schemas() -> None:
     check_strict(captions.CAPTION_SCHEMA, "caption")
     check_strict(captions.REMEMBER_SCHEMA, "remember")
+    check_strict(captions.LOOK_SCHEMA, "look")
     assert captions.CAPTION_SCHEMA["properties"]["place"]["enum"] == captions.PLACES
     assert captions.REMEMBER_SCHEMA["properties"]["kind"]["enum"] == ["person", "fact"]
 
@@ -115,7 +116,7 @@ def test_time() -> None:
 def test_templates() -> None:
     m = moment(NOON - 20 * MIN, CAP)
     assert service.template(m, "o", 0, NOON) == \
-        "I last saw your keys on the wooden counter next to the kettle. Silver with a red fob, seen about 20 minutes ago."
+        "I last saw the keys on the wooden counter next to the kettle. Silver with a red fob, seen about 20 minutes ago."
     assert service.template(m, "p", 0, NOON) == "Sam was wearing red hoodie. Seen about 20 minutes ago."
     assert service.template(m, "scene", 0, NOON) is None
     f = service.template(moment(NOON - 20 * MIN, FACT), "fact", 0, NOON)
@@ -125,6 +126,20 @@ def test_templates() -> None:
     assert service.to_second_person("my keys are mine, I'm sure") == "your keys are yours, you're sure"
     thin = {**CAP, "place_detail": "", "objects": [{**CAP["objects"][0], "on_or_in": "unknown", "near": ""}]}
     assert service.template(moment(NOON, thin), "o", 0, NOON) is None  # no location to speak
+
+
+def test_look() -> None:
+    for q in ("what color was the car that just passed", "what did the store look like", "what did the sign say"):
+        assert service.VISUAL.search(q) or service.JUST.search(q), q
+    for q in ("where are my keys", "when did I leave the house", "where is my passport"):
+        assert not service.VISUAL.search(q) and not service.JUST.search(q), q
+    ms = [moment(i, CAP, ts=i * MIN) for i in range(1, 11)]
+    ids = lambda frames: [m["id"] for m in frames]
+    assert ids(service.look_frames([5], ms, recent=False)) == [4, 5, 6]  # the hit and its neighbours, oldest first
+    assert ids(service.look_frames([1, 10], ms, recent=False)) == [1, 2, 9, 10]  # no neighbour past either end
+    assert ids(service.look_frames([3], ms, recent=True)) == [2, 3, 4, 7, 8, 9, 10]  # "just": the newest frames too
+    assert ids(service.look_frames([2, 9], ms, recent=False, n=3)) == [1, 2, 3]  # the cap keeps the best hit's frames
+    assert service.look_frames([99], ms, recent=False) == []  # a hit on a forgotten moment
 
 
 def test_scenes() -> None:
