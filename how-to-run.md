@@ -1,6 +1,6 @@
 # How to run
 
-Two services run on one laptop: **core** (port 8000, what the phone talks to) and **memory** (port 8001, core calls it over localhost). The browser part (8002) isn't built yet, so browser requests answer "isn't available right now".
+Three services run on one laptop: **core** (port 8000, what the phone talks to), **memory** (port 8001) and the **browser agent** (port 8002, drives a separate demo Chrome for email and lookups). Core calls the other two over localhost.
 
 ## 1. One-time setup
 
@@ -25,6 +25,20 @@ pip install -r requirements.txt
 ```
 Set up .env from the .env.example
 
+**Browser agent** (email and lookups)
+```bash
+brew install uv
+cd browser
+uv sync
+```
+Set up .env from the .env.example. The three keys are different: `TYPESAFE_API_KEY` and `ANTHROPIC_API_KEY` are the same values as in `core/.env`, and only `TEXT_MODEL_API_KEY` is the OpenRouter key. Keep `BU_CDP_URL=http://127.0.0.1:9222` in it.
+
+Then sign in to the demo Chrome once (it's a separate profile, never your everyday Chrome):
+```bash
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --user-data-dir=$HOME/chrome-demo --remote-debugging-port=9222
+```
+In that window, sign in to the **throwaway Gmail** only, and set Settings > General > Undo send to 5 seconds. Quit it when done; run.sh reopens it. `browser-harness --doctor` says FAIL for the daemon until the service is running; that's normal.
+
 **Dashboard** (needs Node)
 ```bash
 cd dashboard
@@ -36,11 +50,11 @@ Optional: `.env` from `.env.example` only to point at a different SpacetimeDB.
 
 run.sh is true source of running everything
 
-From the repo root, this starts memory (8001), core (8000) and the Cloudflare tunnel to core. Ctrl-C stops all of them. Add `--no-tunnel` to skip the tunnel.
+From the repo root, this starts memory (8001), core (8000), the browser agent (8002) with the demo Chrome, and the Cloudflare tunnel to core. Ctrl-C stops all of them. Add `--no-tunnel` to skip the tunnel.
 ```bash
 bash run.sh
 ```
-It also starts the family dashboard, then opens the mirror (http://localhost:8000/mirror) and the dashboard (http://localhost:5173) in your browser, then the tunnel URL once it works.
+It also starts the family dashboard, then opens the mirror (http://localhost:8000/mirror), and the dashboard (http://localhost:5173) in your browser, then the tunnel URL once it works.
 
 ## 3. Give Server URL to the phone (Cloudflare quick tunnel)
 
