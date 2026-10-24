@@ -1,0 +1,17 @@
+// Copy to Config.xcconfig (setup.sh does this) and fill in. Config.xcconfig is git-ignored.
+
+// Apple team from Xcode > Settings > Accounts. Required to install on the iPhone.
+DEVELOPMENT_TEAM =
+
+// Must be unique to your team, e.g. com.<yourname>.glassesrelay
+RELAY_BUNDLE_ID = com.calhacks13.glassesrelay
+
+// From the Wearables Developer Center app. Leave empty while Developer Mode is on in the
+// Meta AI app (Settings > Developer Mode), which is enough for the hackathon.
+META_APP_ID =
+CLIENT_TOKEN =
+
+// GlassesRelay.entitlements adds Hotspot Configuration + Wi-Fi info, which the toolkit uses to
+// stream video over the glasses' Wi-Fi. A free (personal) Apple team cannot sign those; switch
+// to GlassesRelay-free.entitlements if signing fails, and see the README's streaming notes.
+RELAY_ENTITLEMENTS = GlassesRelay/GlassesRelay.entitlements

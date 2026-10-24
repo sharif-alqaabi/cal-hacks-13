@@ -1,0 +1,40 @@
+# Generate the Xcode project with: ./setup.sh   (runs xcodegen; the .xcodeproj is not committed)
+name: GlassesRelay
+options:
+  bundleIdPrefix: com.calhacks13
+  deploymentTarget:
+    iOS: "17.2"
+configFiles:
+  Debug: Config.xcconfig
+  Release: Config.xcconfig
+packages:
+  MetaWearablesDAT:
+    url: https://github.com/facebook/meta-wearables-dat-ios
+    exactVersion: 1.0.1
+targets:
+  GlassesRelay:
+    type: application
+    platform: iOS
+    sources:
+      - path: GlassesRelay
+        excludes:
+          - "*.entitlements"
+          - Info.plist
+    dependencies:
+      - package: MetaWearablesDAT
+        product: MWDATCore
+      - package: MetaWearablesDAT
+        product: MWDATCamera
+      - package: MetaWearablesDAT
+        product: MWDATMockDevice
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(RELAY_BUNDLE_ID)
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: $(RELAY_ENTITLEMENTS)
+        INFOPLIST_FILE: GlassesRelay/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5.0"
+        SWIFT_STRICT_CONCURRENCY: minimal
+        ENABLE_PREVIEWS: NO

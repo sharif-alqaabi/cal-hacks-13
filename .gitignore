@@ -4,3 +4,7 @@ __pycache__/
 node_modules/
 dist/
 memory/thumbs/
+phone/ios/Config.xcconfig
+phone/ios/*.xcodeproj/
+phone/fixtures/*
+!phone/fixtures/README.md
