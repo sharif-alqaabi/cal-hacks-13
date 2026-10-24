@@ -25,6 +25,13 @@ pip install -r requirements.txt
 ```
 Set up .env from the .env.example
 
+**Dashboard** (needs Node)
+```bash
+cd dashboard
+npm install
+```
+Optional: `.env` from `.env.example` only to point at a different SpacetimeDB.
+
 ## 2. Run it
 
 run.sh is true source of running everything
@@ -33,10 +40,11 @@ From the repo root, this starts memory (8001), core (8000) and the Cloudflare tu
 ```bash
 bash run.sh
 ```
+It also starts the family dashboard, then opens the mirror (http://localhost:8000/mirror) and the dashboard (http://localhost:5173) in your browser, then the tunnel URL once it works.
 
 ## 3. Give Server URL to the phone (Cloudflare quick tunnel)
 
-`bash run.sh` starts the tunnel too. Look for the `https://<random-words>.trycloudflare.com` line in the output. In the phone app, use `wss://<random-words>.trycloudflare.com/stream`. The URL changes every run.
+`bash run.sh` starts the tunnel too. Once the tunnel is connected, its `https://<random-words>.trycloudflare.com` URL opens in your browser. If the page doesn't load yet, wait 10 to 20 seconds and refresh. In the phone app, use `wss://<random-words>.trycloudflare.com/stream`. The URL changes every run.
 
 ## 4. Optional: manual testing without the phone
 
