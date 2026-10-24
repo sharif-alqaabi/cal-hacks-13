@@ -311,6 +311,8 @@ class Service:
             gone = {m["id"] for m in dead}
             self.moments = [m for m in self.moments if m["id"] not in gone]
             await self.index.delete(dead)
+            for mid in gone:  # forgotten means the picture too, not only the row
+                (THUMB_DIR / f"{mid}.jpg").unlink(missing_ok=True)
 
     # -- alert ----------------------------------------------------------------
 
@@ -353,8 +355,8 @@ class Service:
 
     def _thumb(self, mid: int, jpeg_b64: str) -> str:
         img = _image(jpeg_b64).convert("RGB")
-        img.thumbnail((320, 240))
-        img.save(THUMB_DIR / f"{mid}.jpg", "JPEG", quality=70)
+        img.thumbnail((640, 480))  # the dashboard shows the newest frame at phone width
+        img.save(THUMB_DIR / f"{mid}.jpg", "JPEG", quality=75)
         return f"{PUBLIC_URL}/thumbs/{mid}.jpg"
 
     async def _store(self, moment: dict) -> None:
