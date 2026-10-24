@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Laptop agent trace</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; font: 20px/1.4 -apple-system, system-ui, sans-serif; background: #0f1115; color: #e8e8e8; }
+  header { padding: 14px 22px; border-bottom: 1px solid #2a2e36; display: flex; gap: 16px; align-items: baseline; }
+  header h1 { font-size: 22px; margin: 0; }
+  header span { color: #8a93a3; font-size: 16px; }
+  #log { list-style: none; margin: 0; padding: 10px 22px 60px; }
+  li { display: grid; grid-template-columns: 130px 110px minmax(0, 1fr) auto; gap: 12px; padding: 7px 0;
+       border-bottom: 1px solid #1c2027; }
+  li.newtask { border-top: 2px solid #3a4150; margin-top: 10px; padding-top: 14px; }
+  .t { color: #8a93a3; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .x { overflow-wrap: anywhere; }
+  .meta { white-space: nowrap; }
+  .k { font-size: 14px; text-transform: uppercase; letter-spacing: .04em; padding: 2px 8px; border-radius: 6px;
+       align-self: start; text-align: center; background: #232833; color: #b9c2d0; }
+  .meta { color: #8a93a3; font-size: 15px; font-variant-numeric: tabular-nums; }
+  .goal .k { background: #23324d; color: #9cc3ff; }
+  .act .k { background: #1f3a2b; color: #8ee0a8; }
+  .guard .k, .confirm .k { background: #4a3a14; color: #ffd36b; }
+  .guard .x { color: #ffd36b; font-weight: 600; }
+  .readback .k, .answer .k { background: #2f2347; color: #cfb2ff; }
+  .readback .x, .answer .x { font-weight: 600; }
+  .verify .k { background: #12404a; color: #7fe3f5; }
+  .fail .k { background: #4a1c1c; color: #ff9b9b; }
+</style>
+</head>
+<body>
+<header><h1>Laptop agent</h1><span>every step the agent takes in Chrome; nothing irreversible without a spoken yes</span></header>
+<ul id="log"></ul>
+<script>
+  let seq = 0, lastTask = null;
+  const log = document.getElementById('log');
+  const fmt = ts => new Date(ts * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'});
+  function row(e) {
+    const li = document.createElement('li');
+    li.className = e.kind + (e.task_id !== lastTask ? ' newtask' : '');
+    lastTask = e.task_id;
+    const meta = [e.p != null ? `p ${e.p}` : '', e.ms != null ? `${e.ms} ms` : ''].filter(Boolean).join(' · ');
+    for (const [cls, text] of [['t', fmt(e.ts)], ['k', e.kind], ['x', e.text], ['meta', meta]]) {
+      const d = document.createElement('div'); d.className = cls; d.textContent = text; li.appendChild(d);
+    }
+    log.appendChild(li);
+  }
+  async function poll() {
+    try {
+      const r = await fetch(`/trace/latest?since=${seq}`);
+      const events = await r.json();
+      for (const e of events) { row(e); seq = e.seq; }
+      if (events.length) window.scrollTo(0, document.body.scrollHeight);
+    } catch (_) {}
+    setTimeout(poll, 400);
+  }
+  poll();
+</script>
+</body>
+</html>
