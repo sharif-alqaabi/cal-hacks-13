@@ -297,7 +297,9 @@ class Service:
                       if d.score >= MIN_SCORE and parse_ref(d.id)[0] in by_id]
             log.info("recall %r top hits: %s", question, [(d.id, round(d.score, 2)) for d in docs[:3]])  # for tuning MIN/FAST_SCORE
             looked = None
-            if self.moments and (VISUAL.search(question) or JUST.search(question) or not strong):
+            # Not for questions with no strong hit: given only weak frames, the model offers a "closest" thing
+            # instead of saying it hasn't seen it (e2e: "where is my umbrella" -> "the closest is a raincoat").
+            if self.moments and (VISUAL.search(question) or JUST.search(question)):
                 looked = await self._look(question, [parse_ref(d.id)[0] for d in docs if d.score >= LOOK_SCORE], now_ms)
             if looked:
                 answer, best = looked
