@@ -348,18 +348,106 @@ async def beat_bicycle(ctx: Ctx):
 
 
 async def beat_clear_hallway(ctx: Ctx):
-    src = REAL / "clear_hallway.mp4"
+    srcs = sorted(REAL.glob("clear_hallway*.mp4"))
+    if not srcs:
+        return "SKIP", None, None, "no clear_hallway*.mp4"
+    t0, notes, bad = time.time(), [], False
+    for src in srcs:
+        _, urgent = await play_clip(ctx, src)
+        bad = bad or bool(urgent)
+        notes.append(f"{src.name}: {[m['text'] for _, m in urgent]}")
+    return ("FAIL" if bad else "PASS"), None, int((time.time() - t0) * 1000), "; ".join(notes)
+
+
+async def memory_settled(ctx: Ctx, timeout: float = 30) -> None:
+    """Wait until memory has captioned every frame it was sent (no-op if memory isn't reachable)."""
+    end = time.time() + timeout
+    async with httpx.AsyncClient(timeout=2) as c:
+        while time.time() < end:
+            try:
+                if (await c.get(f"{ctx.memory_url}/health")).json().get("pending", 0) == 0:
+                    return
+            except Exception:
+                return
+            await asyncio.sleep(0.5)
+
+
+async def beat_kitchen(ctx: Ctx):
+    src = REAL / "kitchen_describe.mp4"
     if not src.exists():
-        return "SKIP", None, None, "no clear_hallway.mp4"
-    t0, urgent = await play_clip(ctx, src)
-    return ("PASS" if not urgent else "FAIL"), None, int((time.time() - t0) * 1000), f"warnings {[m['text'] for _, m in urgent]}"
+        return "SKIP", None, None, "no kitchen_describe.mp4"
+    async with Phone(ctx, load_frames(src)) as ph:
+        await asyncio.sleep(2)
+        t0 = await ph.utter("what's in front of me")
+        texts, first = await turn_reply(ctx, t0, 1, 8)
+        await asyncio.sleep(2)
+        texts, _ = await turn_reply(ctx, t0, 2, 0.1)
+    kitchen = re.search(r"kitchen|counter|sink|fridge|refrigerator|cabinet|kettle|fruit|stove|window|door", " ".join(texts), re.I)
+    ok = (1 <= len(texts) <= 2 and bool(kitchen) and first is not None and first < FIRST_SAY_MAX_S * 1000
+          and not banned(texts))
+    return ("PASS" if ok else "FAIL"), first, int((time.time() - t0) * 1000), f"{texts}"
+
+
+async def beat_keys_then_walk(ctx: Ctx):
+    """Keys are put down on a dresser, then the wearer walks away; the question comes from the hallway."""
+    src = REAL / "keys_then_walk.mp4"
+    if not src.exists():
+        return "SKIP", None, None, "no keys_then_walk.mp4"
+    async with Phone(ctx, load_frames(src), loop_frames=False) as ph:
+        await ph.frames_done.wait()
+        await memory_settled(ctx)
+        t0 = await ph.utter("where did I put my keys")
+        texts, first = await turn_reply(ctx, t0, 1, 10)
+    said = texts[0] if texts else ""
+    where = re.search(r"dresser|cabinet|table|counter|wood|plant|succulent|door|entry|hall|shelf|surface|top", said, re.I)
+    ok = ("key" in said.lower() and not NEGATIVE.search(said) and bool(where)
+          and first is not None and first < FIRST_SAY_MAX_S * 1000)
+    return ("PASS" if ok else "FAIL"), first, int((time.time() - t0) * 1000), f"{texts}"
+
+
+async def beat_meet_sam(ctx: Ctx):
+    """Introduce Sam while he's in view, then ask what he was wearing (green hoodie)."""
+    src = REAL / "meet_sam.mp4"
+    if not src.exists():
+        return "SKIP", None, None, "no meet_sam.mp4"
+    async with Phone(ctx, load_frames(src)) as ph:
+        await asyncio.sleep(4)   # Sam walks into frame
+        t0 = await ph.utter("this is my brother Sam")
+        texts, first = await turn_reply(ctx, t0, 1, 10)
+        await memory_settled(ctx)
+        t1 = await ph.utter("what was Sam wearing")
+        texts2, first2 = await turn_reply(ctx, t1, 1, 10)
+    said = texts2[0] if texts2 else ""
+    ok = (texts[:1] == ["Got it, I'll remember that."] and re.search(r"green", said, re.I) is not None
+          and re.search(r"hoodie|sweatshirt|hood", said, re.I) is not None and first2 is not None
+          and first2 < FIRST_SAY_MAX_S * 1000)
+    return ("PASS" if ok else "FAIL"), first2, int((time.time() - t0) * 1000), f"{texts} -> {texts2}"
+
+
+async def beat_task_mismatch(ctx: Ctx):
+    """Red mug held next to a BLUE MUG card. Core only routes this to the browser service's /work with the frame;
+    the verdict comes from that service, so against the stub only routing and the frame are checked."""
+    src = REAL / "task_mismatch.mp4"
+    if not src.exists():
+        return "SKIP", None, None, "no task_mismatch.mp4"
+    async with Phone(ctx, load_frames(src)) as ph:
+        await asyncio.sleep(1)
+        t0 = await ph.utter("is this the right item")
+        texts, first = await turn_reply(ctx, t0, 1, 10)
+    intents = [e["intent"] for e in mirror_events(ctx, "intent", t0 - 0.5)]
+    log = await stub_log(ctx.browser_url)
+    works = None if log is None else [e for e in log if e["endpoint"] == "/work"]
+    ok = intents[:1] == ["task"] and bool(texts) and (works is None or bool(works))
+    stub = "" if log is None else f" (browser stub: {len(works)} /work call(s), verdict not checked)"
+    return ("PASS" if ok else "FAIL"), first, int((time.time() - t0) * 1000), f"{intents[:1]} {texts}{stub}"
 
 
 BEATS = [
     ("Chair hazard", beat_hazard), ("Signal", beat_signal), ("Keys recall", beat_keys), ("Email", beat_email),
     ("Lost", beat_lost), ("Memory down", beat_memory_down), ("Describe", beat_describe),
     ("Clear path", beat_clear_path), ("Banned phrase", beat_banned),
-    ("Bicycle hazard", beat_bicycle), ("Clear hallway", beat_clear_hallway),
+    ("Bicycle hazard", beat_bicycle), ("Clear hallway", beat_clear_hallway), ("Kitchen describe", beat_kitchen),
+    ("Keys then walk", beat_keys_then_walk), ("Meet Sam", beat_meet_sam), ("Task mismatch", beat_task_mismatch),
 ]
 
 
