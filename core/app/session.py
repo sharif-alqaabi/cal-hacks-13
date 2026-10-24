@@ -29,15 +29,19 @@ NOT_HEARD = "Sorry, I couldn't hear that."
 NOT_CAUGHT = "Sorry, I didn't catch what you need."
 WORKING = "Working on it."
 REMEMBERED = "Got it, I'll remember that."
+NOT_REMEMBERED = "Sorry, I didn't catch what to remember."
 FAMILY_TOLD = "I've let your family know where you are."
 FAMILY_DOWN = "I couldn't reach your family right now."
 NOTHING_PENDING = "There's nothing waiting for a yes right now."
 HAZARDS_OFF = "Obstacle warnings are off."
 
-FIXED_PHRASES = [WORKING, REMEMBERED, FAMILY_TOLD, FAMILY_DOWN, memory.UNAVAILABLE, browser.UNAVAILABLE,
+FIXED_PHRASES = [WORKING, REMEMBERED, NOT_REMEMBERED, FAMILY_TOLD, FAMILY_DOWN, memory.UNAVAILABLE, browser.UNAVAILABLE,
                  NO_FRAME, VISION_DOWN, FALLBACK, NOT_HEARD, NOT_CAUGHT, NOTHING_PENDING, HAZARDS_OFF,
                  *vision.SIGNAL_SENTENCES.values()]
 
+
+
+FRAME_INTENTS = {"describe", "signal", "task"}   # handlers that send a fresh snap to a model
 
 
 class Verbatim(str):
@@ -60,6 +64,7 @@ class Turn:
     reply: list[str] = field(default_factory=list)
     banned_blocked: int = 0
     t_handler: float = 0.0   # perf_counter when the handler started
+    frame_task: asyncio.Task | None = None   # snap requested while routing, for intents that look at the scene
 
     def ms(self) -> int:
         return int((time.perf_counter() - self.t0) * 1000)
@@ -324,11 +329,21 @@ class Session:
             self.snaps.pop(snap_id, None)
             return self.latest
 
+    async def turn_frame(self, turn: Turn) -> FrameMsg | None:
+        """The snap started during routing if there is one, else a new snap."""
+        if turn.frame_task is not None:
+            return await turn.frame_task
+        return await self.fresh_frame()
+
     # ---- voice loop ---------------------------------------------------------
 
     async def handle_utterance(self, text: str, turn: Turn) -> None:
         turn.transcript = text
         await mirror.emit("transcript", text=text)
+        # The keyword guess is instant: if it says the turn will look at the scene, ask the phone for the
+        # full-res frame now so its round trip overlaps routing instead of following it.
+        if router.keyword_route(text) in FRAME_INTENTS:
+            turn.frame_task = self.spawn(self.fresh_frame())
         try:
             intent, source, route_ms = await router.route(text, pending_confirm=self.pending_task_id is not None)
             turn.intent, turn.route_source, turn.route_ms = intent, source, route_ms
@@ -349,7 +364,7 @@ class Session:
         self.spawn(mirror.emit("turn", **rec))
 
     async def do_describe(self, text: str, turn: Turn) -> Reply:
-        f = await self.fresh_frame()
+        f = await self.turn_frame(turn)
         if f is None:
             return NO_FRAME
         return self._describe_stream(f.jpeg_b64)
@@ -380,7 +395,7 @@ class Session:
                 pass
 
     async def do_signal(self, text: str, turn: Turn) -> Reply:
-        f = await self.fresh_frame()
+        f = await self.turn_frame(turn)
         if f is None:
             return NO_FRAME
         try:
@@ -404,8 +419,8 @@ class Session:
         if f is None:
             return NO_FRAME
         try:
-            await memory.remember(text, f.ts, f.jpeg_b64)
-            return REMEMBERED
+            r = await memory.remember(text, f.ts, f.jpeg_b64)
+            return REMEMBERED if r.ok else NOT_REMEMBERED   # memory says ok=false when it found no name or fact
         except Exception as e:
             log.error("remember failed: %r", e)
             return memory.UNAVAILABLE
@@ -442,7 +457,7 @@ class Session:
             return browser.UNAVAILABLE
 
     async def do_task(self, text: str, turn: Turn) -> Reply:
-        f = await self.fresh_frame()
+        f = await self.turn_frame(turn)
         if f is None:
             return NO_FRAME
         try:

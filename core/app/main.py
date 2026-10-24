@@ -9,7 +9,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 
 from contracts.stream import AudioMsg, PttMsg, TextMsg
-from . import config, llm, stt, tts
+from . import config, llm, net, stt, tts
 from .clients import browser, memory
 from .hazards import all_phrases, detector
 from .mirror import mirror
@@ -49,7 +49,7 @@ async def lifespan(app: FastAPI):
     if detector.model is None and not detector.enabled:
         await asyncio.to_thread(detector.load)
     bg = [asyncio.create_task(tts.pregenerate(all_phrases() + FIXED_PHRASES)),
-          asyncio.create_task(poll_services())]
+          asyncio.create_task(poll_services()), asyncio.create_task(net.keep_warm(also=llm.keep_warm))]
     if llm.available():
         bg.append(asyncio.create_task(llm.warm_up([config.ROUTER_FALLBACK_MODEL, config.VISION_MODEL, config.SIGNAL_MODEL])))
     yield

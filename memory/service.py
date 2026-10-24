@@ -28,8 +28,20 @@ THUMB_DIR = Path(__file__).resolve().parent / "thumbs"
 # shortcut: tuned on the 7 mock questions with real captions (real hits 0.5-1.0, a never-seen item 0.19); retune on real photos.
 MIN_SCORE = 0.3    # below this a hit doesn't count: "I haven't seen that."
 FAST_SCORE = 0.45  # at or above this an object/person/fact hit is answered from a template, without Sonnet
+WORKERS = int(os.getenv("CAPTION_WORKERS", "4"))
+PRUNE_EVERY_S = 3.0  # how often dashboard deletions are picked up; off the /recall path (it cost ~100-260 ms per recall)
 DUP_DIFF = 3.0     # mean grey-level difference (0-255) between 16x16 thumbnails under which a frame is a duplicate
 NOT_SEEN = "I haven't seen that."
+STICKY_S = 120     # a frame captioned "other" this soon after a known place is a close-up there (a wall, a face), not a move
+LOOK_SCORE = 0.15  # weaker than MIN_SCORE on purpose: the frames, not the caption, decide whether it was seen
+LOOK_FRAMES = 8    # frames sent to Claude per look-back
+# Core waits 4 s for /recall (SERVICE_TIMEOUT_S), and a timed-out look still has to fall back to the captions in time.
+LOOK_TIMEOUT_S = float(os.getenv("LOOK_TIMEOUT_S", "2.5"))
+
+# Questions about how something looked are answered from the saved frames: a caption is a short summary written
+# before anyone asked. "Just" questions also look at the newest frames, which may not match the caption search.
+VISUAL = re.compile(r"\b(?:colou?rs?|look(?:ed|s)? like|wearing|wore|shape|sign|logo|written|say|said|read|how (?:big|tall|large)|what kind|which)\b", re.I)
+JUST = re.compile(r"\b(?:just|a (?:moment|minute|second) ago|right now)\b", re.I)
 
 LEAVE = re.compile(r"\bwhen did i (?:leave|left|exit|go out of|head out of|get out of)\b", re.I)
 ARRIVE = re.compile(r"\bwhen did i (?:arrive|reach|get (?:home|back|to)|come (?:home|back|in)|walk in)\b", re.I)
@@ -106,6 +118,19 @@ def timeline_answer(question: str, moments: list[dict]) -> tuple[str, dict] | No
     return None
 
 
+def look_frames(hit_ids: list[int], moments: list[dict], recent: bool, n: int = LOOK_FRAMES) -> list[dict]:
+    """Moments to look at again, oldest first: the newest frames for a "just" question, then each hit with the frame
+    before and after it (something passing by may fall between captions). hit_ids are best first."""
+    where = {m["id"]: i for i, m in enumerate(moments)}
+    picked = moments[-4:][::-1] if recent else []
+    for h in hit_ids:
+        if h in where:
+            i = where[h]
+            picked += [moments[i]] + moments[max(0, i - 1):i] + moments[i + 1:i + 2]
+    out = list({m["id"]: m for m in picked}.values())[:n]  # dict keeps first-seen order, so the best picks survive the cap
+    return sorted(out, key=lambda m: m["ts"])
+
+
 def to_second_person(statement: str) -> str:
     """'I put my wallet on the shelf' -> 'you put your wallet on the shelf' (the wearer hears it, so it's 'you')."""
     for first, second in ((r"\bI'm\b", "you're"), (r"\bI've\b", "you've"), (r"\bI'll\b", "you'll"), (r"\bI\b", "you"),
@@ -130,7 +155,7 @@ def template(moment: dict, kind: str, idx: int, now_ms: int) -> str | None:
             return None
         # Two short sentences: core speaks the first as soon as it is synthesised, so what and where come first.
         detail = f"{color[0].upper()}{color[1:]}, seen {when}" if color else f"Seen {when}"
-        return f"I last saw your {name} {loc}. {detail}."
+        return f"I last saw the {name} {loc}. {detail}."  # "the", not "your": a frame doesn't say whose it is
     if kind == "p":
         p = c["people"][idx]
         name, clothing = known(p.get("name")), known(p.get("clothing"))
@@ -160,6 +185,7 @@ class Service:
         self.queue: asyncio.Queue = asyncio.Queue(10)
         self.pending = 0                     # frames queued or being captioned; app.py shows it on /health
         self.last_hash: bytes | None = None  # thumbnail of the last frame kept, for duplicate skipping
+        self.last_place: tuple[float, str, str] = (0.0, "other", "")  # (ts, place, place_detail) of the newest captioned frame
         self.tasks: list[asyncio.Task] = []
         self.bg: set[asyncio.Task] = set()
 
@@ -170,7 +196,10 @@ class Service:
         self.ids = {m["id"] for m in rows}
         self.people = {p["name"]: p for p in await self.db.sql("SELECT * FROM person")}
         await self.index.open(self.moments)
-        self.tasks = [asyncio.create_task(self._worker()) for _ in range(2)]
+        # 4 workers: a caption takes ~4.7 s and core sends up to one frame a second while walking. With 2 the
+        # queue backed up (17 s to drain after a 10 s walk) and dropped frames, which could be the keys frame.
+        self.tasks = [asyncio.create_task(self._worker()) for _ in range(WORKERS)]
+        self.tasks.append(asyncio.create_task(self._prune_loop()))
         log.info("started: %d moments, %d people, test scenes %s", len(rows), len(self.people), TEST_SCENES)
 
     async def close(self) -> None:
@@ -209,6 +238,12 @@ class Service:
     async def _caption(self, ts: float, jpeg_b64: str) -> None:
         scene = scene_of(jpeg_b64)
         cap = await captions.caption(None if scene is not None else jpeg_b64, scene, self._known_people())
+        last_ts, last, last_detail = self.last_place
+        if cap["place"] == "other" and last != "other" and 0 <= ts - last_ts <= STICKY_S:
+            cap["place"] = last
+            cap["place_detail"] = known(cap.get("place_detail")) or last_detail
+        if ts >= last_ts:
+            self.last_place = (ts, cap["place"], known(cap.get("place_detail")))
         mid = self._new_id(ts)
         await self._store({"id": mid, "ts": mid, "caption_json": json.dumps(cap),
                            "thumb_url": self._thumb(mid, jpeg_b64), "place_note": cap["place"]})
@@ -230,9 +265,13 @@ class Service:
             if not name:
                 log.warning("remember: no name in %r", label)
                 return False
-            await self._set_person(name, clothing or "unknown", mid)
             cap = {**base, "scene": "", "objects": [], "text": [],
                    "people": [{"name": name, "clothing": clothing, "position": ""}]}
+            await asyncio.gather(  # independent writes: one round trip to SpacetimeDB instead of two in a row
+                self._set_person(name, clothing or "unknown", mid),
+                self._store({"id": mid, "ts": mid, "caption_json": json.dumps(cap),
+                             "thumb_url": self._thumb(mid, jpeg_b64), "place_note": r["place"]}))
+            return True
         else:
             f = r["fact"]
             if not known(f["item"]) or not known(f["statement"]):
@@ -247,7 +286,6 @@ class Service:
 
     async def recall(self, question: str) -> dict:
         now_ms = int(time.time() * 1000)
-        await self._prune()
         best = None
         hit = timeline_answer(question, self.moments)
         if hit:
@@ -258,7 +296,14 @@ class Service:
             strong = [(d, by_id[parse_ref(d.id)[0]]) for d in docs
                       if d.score >= MIN_SCORE and parse_ref(d.id)[0] in by_id]
             log.info("recall %r top hits: %s", question, [(d.id, round(d.score, 2)) for d in docs[:3]])  # for tuning MIN/FAST_SCORE
-            if not strong:
+            looked = None
+            # Not for questions with no strong hit: given only weak frames, the model offers a "closest" thing
+            # instead of saying it hasn't seen it (e2e: "where is my umbrella" -> "the closest is a raincoat").
+            if self.moments and (VISUAL.search(question) or JUST.search(question)):
+                looked = await self._look(question, [parse_ref(d.id)[0] for d in docs if d.score >= LOOK_SCORE], now_ms)
+            if looked:
+                answer, best = looked
+            elif not strong:
                 answer = NOT_SEEN
             else:
                 top = max(d.score for d, _ in strong)
@@ -281,10 +326,40 @@ class Service:
         self._bg(self.db.call("add_recall", now_ms, question, answer, thumb or ""))
         return {"answer": answer, "ts": best["ts"] / 1000 if best else None, "thumb_url": thumb}
 
+    async def _look(self, question: str, hit_ids: list[int], now_ms: int) -> tuple[str, dict] | None:
+        """Answer from the saved frames themselves, or None (no frames, the call failed, or no frame shows it),
+        in which case the caller answers from the captions as before."""
+        shots = []
+        for m in look_frames(list(dict.fromkeys(hit_ids)), self.moments, bool(JUST.search(question))):
+            path = THUMB_DIR / f"{m['id']}.jpg"
+            if path.exists():  # forgotten from the dashboard: the picture is gone too
+                c = json.loads(m["caption_json"])
+                shots.append((m, (when_phrase(m["ts"], now_ms), base64.b64encode(path.read_bytes()).decode(),
+                                  known(c.get("scene")) or known(c.get("said")))))
+        if not shots:
+            return None
+        try:
+            r = await asyncio.wait_for(captions.look(question, [s for _, s in shots]), LOOK_TIMEOUT_S)
+        except Exception as e:
+            log.warning("look-back failed, answering from captions: %r", e)
+            return None
+        log.info("look-back %r over %d frames -> frame %s", question, len(shots), r["frame"])
+        if not 0 <= r["frame"] < len(shots) or not r["answer"].strip():
+            return None
+        return r["answer"].strip(), shots[r["frame"]][0]
+
     @staticmethod
     def _entry(doc, moment: dict, now_ms: int) -> str:
         told = (doc.metadata or {}).get("kind") == "fact"
         return f"{'you told me' if told else 'seen'} {when_phrase(moment['ts'], now_ms)}: {doc.text}"
+
+    async def _prune_loop(self) -> None:
+        while True:
+            await asyncio.sleep(PRUNE_EVERY_S)
+            try:
+                await self._prune()
+            except Exception as e:
+                log.warning("prune failed: %r", e)
 
     async def _prune(self) -> None:
         """Forget moments deleted from the dashboard: SpacetimeDB is the source of truth."""
@@ -295,6 +370,8 @@ class Service:
             gone = {m["id"] for m in dead}
             self.moments = [m for m in self.moments if m["id"] not in gone]
             await self.index.delete(dead)
+            for mid in gone:  # forgotten means the picture too, not only the row
+                (THUMB_DIR / f"{mid}.jpg").unlink(missing_ok=True)
 
     # -- alert ----------------------------------------------------------------
 
@@ -322,6 +399,7 @@ class Service:
         await self.db.call("delete_all")
         await self.index.delete(self.moments)
         self.moments, self.people, self.ids, self.last_hash = [], {}, set(), None
+        self.last_place = (0.0, "other", "")
 
     # -- helpers --------------------------------------------------------------
 
@@ -337,8 +415,8 @@ class Service:
 
     def _thumb(self, mid: int, jpeg_b64: str) -> str:
         img = _image(jpeg_b64).convert("RGB")
-        img.thumbnail((320, 240))
-        img.save(THUMB_DIR / f"{mid}.jpg", "JPEG", quality=70)
+        img.thumbnail((640, 480))  # the dashboard shows the newest frame at phone width
+        img.save(THUMB_DIR / f"{mid}.jpg", "JPEG", quality=75)
         return f"{PUBLIC_URL}/thumbs/{mid}.jpg"
 
     async def _store(self, moment: dict) -> None:

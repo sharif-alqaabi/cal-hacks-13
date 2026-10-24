@@ -7,6 +7,7 @@ import json
 import os
 
 import anthropic
+import httpx2
 
 CAPTION_MODEL = os.getenv("CAPTION_MODEL", "claude-haiku-5-5")
 ANSWER_MODEL = os.getenv("ANSWER_MODEL", "claude-haiku-5-5")  # claude-sonnet-5-5 also works, about 0.2 s slower and less steady
@@ -32,7 +33,10 @@ For every object someone might later look for or bump into, record:
 - text: any printed or handwritten text on it
 
 Always include small, easily misplaced items (keys, wallet, phone, glasses, medication, cards,
-remote) even when they're a small part of the frame. Skip things nobody would ask about.
+remote) even when they're a small part of the frame. Also record vehicles in view, moving or
+parked (type and color), and the buildings and storefronts around the wearer (color, material,
+and any name on them), since they may later ask "what color was that car" or "what did the
+store I just left look like". Skip things nobody would ask about.
 
 Rules:
 - Write "unknown" for any detail you can't see clearly. Never guess a color in poor light or a
@@ -67,11 +71,22 @@ strings in the other part. place is one of: home, outside, office, store, transi
 
 RECALL_PROMPT = """\
 Answer a blind person's question about where something is or what they saw, using only the
-memory entries below. One spoken sentence, under 30 words. Say when it was seen ("about 20
-minutes ago"; the clock time if over an hour). Describe the location by touch and landmarks
+memory entries below. One spoken sentence, under 30 words. Say when it was seen by copying the
+time words from that entry exactly; never work out a time of your own. Describe the location by touch and landmarks
 ("on the wooden counter, next to the kettle"), never "over there". If the best entry is
 something they told you, say "You told me...". If entries disagree, trust the most recent. If no
 entry answers the question, say you haven't seen it. Never add details not in the entries.
+"""
+
+LOOK_PROMPT = """\
+A blind person asked a question about something they saw earlier. Below are camera frames from
+their smart glasses, oldest first, each labeled with when it was seen and what was noted at the
+time. Look at the frames themselves, not just the notes: the notes were written before anyone
+asked and may have left the detail out. Answer in one spoken sentence under 30 words. Say when it
+was seen by copying the "seen" words from that frame's label exactly; never work out a time of your
+own. Name colors plainly. Set frame
+to the number of the frame the answer comes from. If no frame clearly shows the answer, set frame
+to -1 and leave answer empty: never guess. Never read out ID, card or account numbers.
 """
 
 OBJECT_FIELDS = ("name", "color", "size", "material", "shape", "state", "on_or_in", "near", "position", "text")
@@ -113,6 +128,8 @@ REMEMBER_SCHEMA = _schema({
     "place_detail": {"type": "string"},
 })
 
+LOOK_SCHEMA = _schema({"answer": {"type": "string"}, "frame": {"type": "integer"}})
+
 _client: anthropic.AsyncAnthropic | None = None
 
 
@@ -120,7 +137,11 @@ def client() -> anthropic.AsyncAnthropic:
     """Created on first use so importing this module never needs a key."""
     global _client
     if _client is None:
-        _client = anthropic.AsyncAnthropic()
+        # The SDK drops idle connections after 5 s, so a recall after a pause paid a new TLS handshake
+        # (~190 ms measured in core). Keep them for 5 minutes.
+        http = anthropic.DefaultAsyncHttpxClient(limits=httpx2.Limits(max_connections=100, max_keepalive_connections=20,
+                                                                      keepalive_expiry=300))
+        _client = anthropic.AsyncAnthropic(http_client=http)
     return _client
 
 
@@ -175,3 +196,13 @@ async def answer(question: str, entries: list[str]) -> str:
     if resp.stop_reason == "refusal":
         raise RuntimeError("model refused the question")
     return next(b.text for b in resp.content if b.type == "text").strip()
+
+
+async def look(question: str, frames: list[tuple[str, str, str]]) -> dict:
+    """Question + saved frames as (when, jpeg_b64, what was noted), oldest first -> {answer, frame}; frame -1 = not shown."""
+    content = []
+    for i, (when, jpeg_b64, note) in enumerate(frames):
+        content.append({"type": "text", "text": f"Frame {i}, seen {when}" + (f". Noted then: {note}" if note else "")})
+        content.append(_frame_block(jpeg_b64, None))
+    content.append({"type": "text", "text": f"Question: {question}"})
+    return await _structured(LOOK_PROMPT, LOOK_SCHEMA, content)

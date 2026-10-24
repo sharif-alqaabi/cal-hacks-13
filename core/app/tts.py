@@ -9,13 +9,11 @@ import base64
 import hashlib
 import logging
 
-import httpx
-
-from . import config
+from . import config, net
 
 log = logging.getLogger("core.tts")
 
-URL = "https://api.cartesia.ai/tts/bytes"
+BASE = "https://api.cartesia.ai"
 _mem: dict[str, str] = {}
 status = {"cached": 0, "total": 0, "last_error": None}
 
@@ -45,21 +43,20 @@ def cached(text: str) -> str | None:
 
 
 async def _fetch(text: str) -> bytes:
-    async with httpx.AsyncClient(timeout=config.TTS_TIMEOUT_S) as client:
-        r = await client.post(
-            URL,
-            headers={"X-API-Key": config.CARTESIA_API_KEY, "Cartesia-Version": config.CARTESIA_VERSION},
-            json={
-                "model_id": config.CARTESIA_TTS_MODEL,
-                "transcript": text,
-                "voice": {"mode": "id", "id": config.CARTESIA_VOICE_ID},
-                "language": "en",
-                "output_format": {"container": "raw", "encoding": "pcm_s16le", "sample_rate": config.TTS_RATE},
-            },
-        )
-        if r.status_code >= 400:
-            raise RuntimeError(f"HTTP {r.status_code}: {r.text[:200]}")
-        return r.content
+    r = await net.client(BASE, config.TTS_TIMEOUT_S).post(
+        "/tts/bytes",
+        headers={"X-API-Key": config.CARTESIA_API_KEY, "Cartesia-Version": config.CARTESIA_VERSION},
+        json={
+            "model_id": config.CARTESIA_TTS_MODEL,
+            "transcript": text,
+            "voice": {"mode": "id", "id": config.CARTESIA_VOICE_ID},
+            "language": "en",
+            "output_format": {"container": "raw", "encoding": "pcm_s16le", "sample_rate": config.TTS_RATE},
+        },
+    )
+    if r.status_code >= 400:
+        raise RuntimeError(f"HTTP {r.status_code}: {r.text[:200]}")
+    return r.content
 
 
 async def synth(text: str) -> str:

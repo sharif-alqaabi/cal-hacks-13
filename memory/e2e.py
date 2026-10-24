@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 import drive  # noqa: E402
 from app import app  # noqa: E402
+from service import PRUNE_EVERY_S  # noqa: E402
 
 FAILS = []
 
@@ -74,6 +75,7 @@ with TestClient(app) as c:
     r = httpx.post(f"{os.getenv('SPACETIME_HOST', 'https://maincloud.spacetimedb.com')}/v1/database/{os.environ['SPACETIME_DB']}/call/delete_moment",
                    json=[keys["id"]], headers={"Authorization": f"Bearer {os.environ['SPACETIME_TOKEN']}"})
     check(r.status_code == 200, "delete_moment reducer")
+    time.sleep(PRUNE_EVERY_S + 1)  # deletions are picked up by the prune loop, not on the /recall path
     check(c.post("/recall", json={"question": "where are my keys"}).json()["answer"] == "I haven't seen that.", "deleted moment no longer recalled")
 
     check(c.post("/reset").json() == {"ok": True}, "/reset cleans up")

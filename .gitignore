@@ -4,6 +4,7 @@ __pycache__/
 node_modules/
 dist/
 memory/thumbs/
+*.tsbuildinfo
 phone/ios/Config.xcconfig
 phone/ios/*.xcodeproj/
 phone/fixtures/*
