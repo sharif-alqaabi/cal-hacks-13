@@ -14,9 +14,19 @@ def _flag(name: str) -> bool:
 
 FAKE = _flag("BROWSER_FAKE")
 
+OPENROUTER_BASE_URL = "https://openrouter.ai/api"
+
+
+def _base_url(name: str, key: str, direct: str) -> str:
+    """An explicit *_BASE_URL wins; otherwise an OpenRouter key (sk-or-...) routes through OpenRouter."""
+    return (os.getenv(name) or (OPENROUTER_BASE_URL if key.startswith("sk-or-") else direct)).rstrip("/")
+
+
 TYPESAFE_API_KEY = os.getenv("TYPESAFE_API_KEY", "")
+TYPESAFE_BASE_URL = _base_url("TYPESAFE_BASE_URL", TYPESAFE_API_KEY, "https://api.typesafe.ai")
 TEXT_MODEL_API_KEY = os.getenv("TEXT_MODEL_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+ANTHROPIC_BASE_URL = _base_url("ANTHROPIC_BASE_URL", ANTHROPIC_API_KEY, "https://api.anthropic.com")
 READBACK_MODEL = os.getenv("READBACK_MODEL", "claude-sonnet-5-5")
 WORK_MODEL = os.getenv("WORK_MODEL", "claude-sonnet-5-5")
 

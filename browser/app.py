@@ -77,6 +77,7 @@ async def health():
         "chrome": chrome,
         "keys": {"typesafe": bool(config.TYPESAFE_API_KEY), "text_model": bool(config.TEXT_MODEL_API_KEY),
                  "anthropic": bool(config.ANTHROPIC_API_KEY)},
+        "endpoints": {"jev": config.TYPESAFE_BASE_URL, "claude": config.ANTHROPIC_BASE_URL},
         "contacts": sorted(goals.contacts()),
         "pending": len(runner.store.pending),
         "prefill": config.GMAIL_PREFILL,

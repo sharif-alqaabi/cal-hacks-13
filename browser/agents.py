@@ -13,11 +13,32 @@ except Exception:   # jev-ultrafast not installed: only the fake agent can run
         """A decision no longer refers to the observed page."""
 
 
+TYPESAFE_URL = "https://api.typesafe.ai/v1/systemone"
+
+
+def route_jev() -> None:
+    """Jev Ultrafast hardcodes TypeSafe's endpoint. Send its decision calls to TYPESAFE_BASE_URL instead
+    (OpenRouter serves the same System One API at /api/v1/systemone and maps jev-latest to ~typesafe/jev-latest)."""
+    from jev_ultrafast import model
+    if getattr(model.post_json, "routed", False):
+        return
+    original = model.post_json
+
+    def post_json(url, key, body):
+        if url == TYPESAFE_URL:
+            url = config.TYPESAFE_BASE_URL + "/v1/systemone"
+        return original(url, key, body)
+
+    post_json.routed = True
+    model.post_json = post_json
+
+
 def make_agent(url: str, goal: str):
     if config.FAKE:
         from fake_agent import FakeAgent
         return FakeAgent(url, goal)
     from jev_ultrafast import Agent
+    route_jev()
     return Agent(url, goal)
 
 

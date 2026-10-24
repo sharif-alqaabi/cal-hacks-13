@@ -31,9 +31,11 @@ replies through macOS `say`), and http://localhost:8002/trace shows every step.
 
 ## One-time setup for the real agent
 
-1. **Keys** in `browser/.env`: `TYPESAFE_API_KEY` (Jev), `TEXT_MODEL_API_KEY` (OpenRouter, writes typed text),
-   `ANTHROPIC_API_KEY` (goal parsing, read-back summaries, lookup answers, `/work`). Without the Anthropic key, rule-based
-   fallbacks parse goals and read opening hours.
+1. **Keys** in `browser/.env` (not `.env.example`): `TYPESAFE_API_KEY` (Jev), `TEXT_MODEL_API_KEY` (writes typed text),
+   `ANTHROPIC_API_KEY` (goal parsing, read-back summaries, lookup answers, `/work`). All three can be the same
+   **OpenRouter** key (`sk-or-...`): Jev calls then go to OpenRouter's System One API and Claude calls to its
+   Anthropic-compatible Messages API (`anthropic/claude-sonnet-5.5`), both at `https://openrouter.ai/api`.
+   `GET /health` shows the endpoints in use. Without a Claude key, rule-based fallbacks parse goals and read opening hours.
 2. **Chrome profile**: make a dedicated Chrome profile for the demo. Sign in to a **throwaway Gmail** there,
    never a real account.
 3. **Gmail settings** in that account: Settings > General > Undo send = **5 seconds** (`UNDO_SEND_S=5`);
