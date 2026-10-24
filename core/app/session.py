@@ -29,12 +29,13 @@ NOT_HEARD = "Sorry, I couldn't hear that."
 NOT_CAUGHT = "Sorry, I didn't catch what you need."
 WORKING = "Working on it."
 REMEMBERED = "Got it, I'll remember that."
+NOT_REMEMBERED = "Sorry, I didn't catch what to remember."
 FAMILY_TOLD = "I've let your family know where you are."
 FAMILY_DOWN = "I couldn't reach your family right now."
 NOTHING_PENDING = "There's nothing waiting for a yes right now."
 HAZARDS_OFF = "Obstacle warnings are off."
 
-FIXED_PHRASES = [WORKING, REMEMBERED, FAMILY_TOLD, FAMILY_DOWN, memory.UNAVAILABLE, browser.UNAVAILABLE,
+FIXED_PHRASES = [WORKING, REMEMBERED, NOT_REMEMBERED, FAMILY_TOLD, FAMILY_DOWN, memory.UNAVAILABLE, browser.UNAVAILABLE,
                  NO_FRAME, VISION_DOWN, FALLBACK, NOT_HEARD, NOT_CAUGHT, NOTHING_PENDING, HAZARDS_OFF,
                  *vision.SIGNAL_SENTENCES.values()]
 
@@ -404,8 +405,8 @@ class Session:
         if f is None:
             return NO_FRAME
         try:
-            await memory.remember(text, f.ts, f.jpeg_b64)
-            return REMEMBERED
+            r = await memory.remember(text, f.ts, f.jpeg_b64)
+            return REMEMBERED if r.ok else NOT_REMEMBERED   # memory says ok=false when it found no name or fact
         except Exception as e:
             log.error("remember failed: %r", e)
             return memory.UNAVAILABLE

@@ -15,7 +15,8 @@ DESCRIBE_SYSTEM = (
 SIGNAL_SYSTEM = (
     "You read pedestrian signals for a blind person. Look only at what is visible.\n"
     'Reply with JSON only: {"signal": "walk" | "dont_walk" | "countdown" | "unclear" | "none", '
-    '"countdown": <int or null>, "vehicles": [{"motion": "moving"|"stopped", "from": "left"|"right"|"ahead"}]}'
+    '"countdown": <int or null>, "vehicles": [{"motion": "moving"|"stopped", "from": "left"|"right"|"ahead"}]}\n'
+    'If digits are lit next to the hand, the signal is "countdown" with that number, not "dont_walk".'
 )
 
 CHAT_SYSTEM = "You are a helpful voice assistant for a blind person. Answer in at most two short spoken sentences."

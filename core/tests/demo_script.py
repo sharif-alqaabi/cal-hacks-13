@@ -31,6 +31,7 @@ WAVS = {
     "email Sam that I'm at the Palace of Fine Arts": "email", "yes send it": "yes", "I'm lost": "lost",
 }
 FIRST_SAY_MAX_S = 3.5
+NEGATIVE = re.compile(r"\b(can't|cannot|haven't|didn't|doesn't|don't|isn't|not)\b", re.I)   # "I can't see your keys" is a miss
 
 
 def first_existing(*paths: Path) -> Path | None:
@@ -198,13 +199,14 @@ async def beat_hazard(ctx: Ctx):
         await ph.frames_done.wait()
         await asyncio.sleep(1)
     urgent = await wait_says(ctx, t0, 1, 0.1, urgent=True)
-    hz = mirror_events(ctx, "hazard", t0)
+    hits = [(t, m) for t, m in urgent if re.match(pat, m["text"])]
+    hz = [e for e in mirror_events(ctx, "hazard", t0) if re.match(pat, e["text"])]
     lag = hz[0]["lag_ms"] if hz else None
-    ok = bool(urgent) and re.match(pat, urgent[0][1]["text"]) and lag is not None and lag < 1000
-    repeats = [m for _, m in urgent if m["text"] == (urgent[0][1]["text"] if urgent else "")]
-    gaps = [b - a for (a, _), (b, _) in zip(urgent, urgent[1:])]
+    ok = bool(hits) and lag is not None and lag < 1000
+    gaps = [b - a for (a, _), (b, _) in zip(hits, hits[1:])]
     ok = ok and all(g >= 3 for g in gaps)
-    note = f"{urgent[0][1]['text']!r} lag {lag} ms, {len(repeats)} warning(s), src {src.name}" if urgent else f"no warning (src {src.name})"
+    texts = [m["text"] for _, m in urgent]
+    note = f"warnings {texts}, lag {lag} ms, src {src.name}" if urgent else f"no warning (src {src.name})"
     return ("PASS" if ok else "FAIL"), lag, int((time.time() - t0) * 1000), note
 
 
@@ -231,7 +233,7 @@ async def beat_keys(ctx: Ctx):
     log = await stub_log(ctx.memory_url)
     ingests = None if log is None else sum(e["endpoint"] == "/ingest" for e in log)
     limit = 2000 if ctx.mode == "offline" else FIRST_SAY_MAX_S * 1000
-    ok = bool(texts) and "keys" in texts[0].lower() and first is not None and first < limit and (ingests is None or ingests >= 1)
+    ok = bool(texts) and "keys" in texts[0].lower() and not NEGATIVE.search(texts[0]) and first is not None and first < limit and (ingests is None or ingests >= 1)
     return ("PASS" if ok else "FAIL"), first, int((time.time() - t0) * 1000), f"ingests={ingests} {texts}"
 
 
@@ -323,10 +325,41 @@ async def beat_banned(ctx: Ctx):
     return ("PASS" if ok else "FAIL"), first, int((time.time() - t0) * 1000), f"{texts} banned_blocked={blocked}"
 
 
+async def play_clip(ctx: Ctx, src: Path) -> tuple[float, list]:
+    """Stream a clip once with no utterance; returns the start time and the urgent says it drew."""
+    t0 = time.time()
+    async with Phone(ctx, load_frames(src), loop_frames=False) as ph:
+        await ph.frames_done.wait()
+        await asyncio.sleep(1)
+    return t0, await wait_says(ctx, t0, 1, 0.1, urgent=True)
+
+
+async def beat_bicycle(ctx: Ctx):
+    src = REAL / "bicycle_walk.mp4"
+    if not src.exists():
+        return "SKIP", None, None, "no bicycle_walk.mp4"
+    t0, urgent = await play_clip(ctx, src)
+    pat = r"^Stop, (bicycle|bike)"
+    hits = [m["text"] for _, m in urgent if re.match(pat, m["text"])]
+    hz = [e for e in mirror_events(ctx, "hazard", t0) if re.match(pat, e["text"])]
+    lag = hz[0]["lag_ms"] if hz else None
+    ok = bool(hits) and lag is not None and lag < 1000
+    return ("PASS" if ok else "FAIL"), lag, int((time.time() - t0) * 1000), f"warnings {[m['text'] for _, m in urgent]}, lag {lag} ms"
+
+
+async def beat_clear_hallway(ctx: Ctx):
+    src = REAL / "clear_hallway.mp4"
+    if not src.exists():
+        return "SKIP", None, None, "no clear_hallway.mp4"
+    t0, urgent = await play_clip(ctx, src)
+    return ("PASS" if not urgent else "FAIL"), None, int((time.time() - t0) * 1000), f"warnings {[m['text'] for _, m in urgent]}"
+
+
 BEATS = [
     ("Chair hazard", beat_hazard), ("Signal", beat_signal), ("Keys recall", beat_keys), ("Email", beat_email),
     ("Lost", beat_lost), ("Memory down", beat_memory_down), ("Describe", beat_describe),
     ("Clear path", beat_clear_path), ("Banned phrase", beat_banned),
+    ("Bicycle hazard", beat_bicycle), ("Clear hallway", beat_clear_hallway),
 ]
 
 
