@@ -1,0 +1,6 @@
+.env
+.venv/
+__pycache__/
+*.pt
+tests/fixtures/*
+!tests/fixtures/README.md

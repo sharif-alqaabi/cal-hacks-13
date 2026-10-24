@@ -1,0 +1,12 @@
+fastapi>=0.115
+uvicorn[standard]>=0.30
+websockets>=12
+httpx>=0.27
+pydantic>=2.7
+python-dotenv>=1.0
+anthropic>=0.40
+numpy>=1.26
+opencv-python>=4.9
+ultralytics>=8.3     # YOLO nano for the local hazard loop; downloads yolov8n.pt on first run
+pytest>=8
+# optional: sounddevice  (mic push-to-talk in tests/fake_glasses.py)
