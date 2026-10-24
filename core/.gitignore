@@ -2,5 +2,9 @@
 .venv/
 __pycache__/
 *.pt
+cache/
+logs/
 tests/fixtures/*
 !tests/fixtures/README.md
+!tests/fixtures/transcripts.json
+tests/out/

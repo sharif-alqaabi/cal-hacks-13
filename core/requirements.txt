@@ -8,5 +8,3 @@ anthropic>=0.40
 numpy>=1.26
 opencv-python>=4.9
 ultralytics>=8.3     # YOLO nano for the local hazard loop; downloads yolov8n.pt on first run
-pytest>=8
-# optional: sounddevice  (mic push-to-talk in tests/fake_glasses.py)

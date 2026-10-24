@@ -7,11 +7,16 @@ Pydantic models in this folder are the source of truth. Ping Eng 2 before changi
 | Direction | type | Fields |
 |---|---|---|
 | phone -> core | `frame` | `{ts, jpeg_b64, w, h, snap_id?}` ~5 fps, 640x480, JPEG q~70 |
-| phone -> core | `audio` | `{ts, pcm16_b64, rate: 8000}` |
+| phone -> core | `audio` | `{ts, pcm16_b64, rate}` |
 | phone -> core | `ptt` | `{state: "down" \| "up"}` |
 | phone -> core | `text` | `{text}` dev/demo only, skips STT |
 | core -> phone | `say` | `{id, text, pcm16_b64, rate, urgent}` urgent interrupts playback |
 | core -> phone | `snap` | `{snap_id}` answer with one full-res `frame` carrying `snap_id` |
+
+`audio.rate` is 8000 from the glasses (HFP) or 16000 from the phone mic; send ~100 ms chunks.
+A reply may arrive as **two consecutive non-urgent `say` messages** (one per sentence). The phone must
+**queue** non-urgent says and play them in order; an urgent say clears the queue and interrupts.
+`pcm16_b64` may be `""`: speak `text` with on-device TTS.
 
 ## Memory (MEMORY_URL)
 

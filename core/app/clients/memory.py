@@ -7,12 +7,20 @@ from .. import config
 UNAVAILABLE = "Memory isn't available right now."
 
 
-def _client() -> httpx.AsyncClient:
-    return httpx.AsyncClient(base_url=config.MEMORY_URL, timeout=config.SERVICE_TIMEOUT_S)
+def _client(timeout: float | None = None) -> httpx.AsyncClient:
+    return httpx.AsyncClient(base_url=config.MEMORY_URL, timeout=timeout or config.SERVICE_TIMEOUT_S)
+
+
+async def health() -> bool:
+    try:
+        async with _client(timeout=1) as c:
+            return (await c.get("/health")).status_code < 400
+    except Exception:
+        return False
 
 
 async def ingest(ts: float, jpeg_b64: str) -> None:
-    async with _client() as c:
+    async with _client(timeout=config.INGEST_TIMEOUT_S) as c:
         await c.post("/ingest", json=IngestReq(ts=ts, jpeg_b64=jpeg_b64).model_dump())
 
 

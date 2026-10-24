@@ -1,0 +1,34 @@
+{
+  "by_sha1": {
+    "8c2cb1deec639651e62dfc3c6133b3231598b666": "what's in front of me",
+    "d2503917c2b52e0447f87e41450777f9f13570bb": "what's in front of me",
+    "df0adc31b353ca4d5e0e5555c5a0257e4dfb9d3e": "what does the signal say",
+    "eaee0f14ea849d2fd0bcb7a070de698c532532c6": "what does the signal say",
+    "b27a1bcf8ca8f52e158e73679395e0cfd2c44411": "where did I put my keys",
+    "99c2e93ddc59f687ce8b6b84ad006a2a3769099e": "where did I put my keys",
+    "ce53f83c5c41a2a263b4a2259717007881be0bab": "email Sam that I'm at the Palace of Fine Arts",
+    "1591505e78a804a556135937f7cc64ad742b7d65": "email Sam that I'm at the Palace of Fine Arts",
+    "c64d28c8dba7c9a8d2828745333a450496347206": "yes send it",
+    "924ea2db632a2ffb988196285d3418de914e506b": "yes send it",
+    "589d3d863072ba5cb9796122acda81da22d17d7a": "I'm lost",
+    "bcbf0184dbc15da9ce9437fc37ec2aeada05c257": "I'm lost",
+    "423066f7f1fca0e371e6f25b1a081d015ecc1534": "this is my brother Sam",
+    "4434bfaba98d46c6e82c9b670b285a31a213cd43": "this is my brother Sam"
+  },
+  "by_file": {
+    "describe.wav": "what's in front of me",
+    "describe_16k.wav": "what's in front of me",
+    "signal.wav": "what does the signal say",
+    "signal_16k.wav": "what does the signal say",
+    "keys.wav": "where did I put my keys",
+    "keys_16k.wav": "where did I put my keys",
+    "email.wav": "email Sam that I'm at the Palace of Fine Arts",
+    "email_16k.wav": "email Sam that I'm at the Palace of Fine Arts",
+    "yes.wav": "yes send it",
+    "yes_16k.wav": "yes send it",
+    "lost.wav": "I'm lost",
+    "lost_16k.wav": "I'm lost",
+    "sam.wav": "this is my brother Sam",
+    "sam_16k.wav": "this is my brother Sam"
+  }
+}

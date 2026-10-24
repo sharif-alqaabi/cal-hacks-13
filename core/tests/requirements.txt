@@ -1,0 +1,3 @@
+# Test-only dependencies: pip install -r tests/requirements.txt
+pytest>=8
+# optional: sounddevice   (mic push-to-talk in tests/fake_glasses.py)

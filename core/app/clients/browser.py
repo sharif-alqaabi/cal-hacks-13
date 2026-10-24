@@ -11,6 +11,14 @@ def _client(timeout: float | None = None) -> httpx.AsyncClient:
     return httpx.AsyncClient(base_url=config.BROWSER_URL, timeout=timeout or config.SERVICE_TIMEOUT_S)
 
 
+async def health() -> bool:
+    try:
+        async with _client(timeout=1) as c:
+            return (await c.get("/health")).status_code < 400
+    except Exception:
+        return False
+
+
 async def task(goal: str) -> TaskResp:
     # Drafting can take up to ~30 s on the real agent (PRD 4 B-1).
     async with _client(timeout=40) as c:

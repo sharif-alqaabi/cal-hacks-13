@@ -6,6 +6,9 @@
 
 Type a sentence and press Enter to "say" it (sent as a text message, skipping STT).
 Type /ptt to send a push-to-talk down/up with a short mic recording (needs sounddevice).
+Type /wav <file> to send a WAV over push-to-talk at real-time pace (e.g. tests/fixtures/audio/keys.wav).
+--rate 8000|16000 sets the /ptt mic rate (8000 mimics the glasses HFP mic).
+Prints the latency from PTT up / text sent to the first say received.
 """
 import argparse
 import asyncio
@@ -13,6 +16,7 @@ import base64
 import json
 import sys
 import time
+import wave
 from pathlib import Path
 
 import cv2
@@ -56,7 +60,7 @@ def encode(img, width: int) -> dict:
 
 async def main(args):
     next_frame = open_source(args)
-    latest = {"img": None}
+    latest = {"img": None, "t_end": None}
     async with websockets.connect(args.url, max_size=None) as ws:
         print(f"connected to {args.url}. Type to speak, Ctrl+C to quit.")
 
@@ -73,7 +77,11 @@ async def main(args):
                 m = json.loads(raw)
                 if m["type"] == "say":
                     tag = "URGENT " if m.get("urgent") else ""
-                    print(f"\n  << {tag}{m['text']}")
+                    lat = ""
+                    if latest["t_end"] and not m.get("urgent"):
+                        lat = f"  ({int((time.time() - latest['t_end']) * 1000)} ms to first say)"
+                        latest["t_end"] = None
+                    print(f"\n  << {tag}{m['text']}{lat}")
                 elif m["type"] == "snap" and latest["img"] is not None:
                     f = encode(latest["img"], 1280)
                     f["snap_id"] = m["snap_id"]
@@ -86,9 +94,12 @@ async def main(args):
                 if not line:
                     continue
                 if line == "/ptt":
-                    await push_to_talk(ws)
+                    await push_to_talk(ws, rate=args.rate)
+                elif line.startswith("/wav "):
+                    await send_wav(ws, line[5:].strip())
                 else:
                     await ws.send(json.dumps({"type": "text", "text": line}))
+                latest["t_end"] = time.time()
 
         await asyncio.gather(send_frames(), receive(), typing())
 
@@ -106,6 +117,22 @@ async def push_to_talk(ws, seconds: float = 3.0, rate: int = 8000):
     await ws.send(json.dumps({"type": "ptt", "state": "up"}))
 
 
+async def send_wav(ws, path: str):
+    try:
+        with wave.open(path) as w:
+            pcm, rate = w.readframes(w.getnframes()), w.getframerate()
+    except Exception as e:
+        print(f"  can't read {path}: {e}")
+        return
+    await ws.send(json.dumps({"type": "ptt", "state": "down"}))
+    step = rate * 2 // 10   # 100 ms
+    for i in range(0, len(pcm), step):
+        await ws.send(json.dumps({"type": "audio", "ts": time.time(), "rate": rate,
+                                  "pcm16_b64": base64.b64encode(pcm[i:i + step]).decode()}))
+        await asyncio.sleep(0.1)
+    await ws.send(json.dumps({"type": "ptt", "state": "up"}))
+
+
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--url", default="ws://127.0.0.1:8000/stream")
@@ -113,6 +140,7 @@ if __name__ == "__main__":
     p.add_argument("--video")
     p.add_argument("--images")
     p.add_argument("--fps", type=float, default=5)
+    p.add_argument("--rate", type=int, default=8000, choices=[8000, 16000])
     try:
         asyncio.run(main(p.parse_args()))
     except KeyboardInterrupt:

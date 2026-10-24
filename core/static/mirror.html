@@ -14,7 +14,7 @@
   .pill.on { color:var(--ok); }
   main { display:grid; grid-template-columns: 2fr 1fr; gap:16px; padding:16px 20px; }
   section { background:var(--panel); border-radius:10px; padding:14px; }
-  #log { height: calc(100vh - 210px); overflow-y:auto; display:flex; flex-direction:column; gap:10px; }
+  #log { overflow-y:auto; display:flex; flex-direction:column; gap:10px; }
   .row { padding:8px 12px; border-radius:8px; background:#1e232c; }
   .you { border-left:3px solid var(--accent); }
   .say { border-left:3px solid var(--ok); font-size:20px; }
@@ -26,6 +26,15 @@
   form { display:flex; gap:8px; margin-top:12px; }
   input { flex:1; padding:10px; border-radius:8px; border:1px solid #2b3340; background:#0e1116; color:var(--text); font-size:16px; }
   button { padding:10px 14px; border-radius:8px; border:0; background:var(--accent); color:#001; font-weight:600; cursor:pointer; }
+  #view { position:relative; background:#000; border-radius:8px; overflow:hidden; aspect-ratio:4/3; margin-bottom:12px; }
+  #view img { width:100%; height:100%; object-fit:contain; display:block; }
+  #hbox { position:absolute; border:4px solid var(--warn); display:none; }
+  #pills { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; }
+  .pill.off { color:var(--warn); }
+  #talk { width:100%; margin-top:10px; padding:14px; font-size:16px; background:#26303d; color:var(--text); }
+  #talk.on { background:var(--warn); color:#fff; }
+  #thumb { max-width:100%; border-radius:8px; margin-top:8px; display:none; }
+  #log { height: calc(100vh - 210px); }
   @media (max-width: 800px) { main { grid-template-columns: 1fr; } #log { height: 50vh; } }
 </style>
 </head>
@@ -40,6 +49,8 @@
 <main>
   <section><div id="log"></div></section>
   <section>
+    <div id="view"><img id="frame" alt="Live view from the glasses" style="visibility:hidden"><div id="hbox"></div></div>
+    <div id="pills"></div>
     <div class="meta">Intent</div>
     <div id="intent">—</div>
     <div class="meta" id="src"></div>
@@ -49,14 +60,17 @@
       <tr><td>Router</td><td id="l-route">—</td></tr>
       <tr><td>Handler</td><td id="l-handled">—</td></tr>
       <tr><td>Text to speech</td><td id="l-tts">—</td></tr>
+      <tr><td>First audio (turn end to first reply)</td><td id="l-first">—</td></tr>
       <tr><td>Hazard (frame to warning)</td><td id="l-hazard">—</td></tr>
     </table>
     <form id="f"><input id="t" placeholder="Type what the wearer says…" autocomplete="off"><button>Send</button></form>
+    <button id="talk">Hold Space (or this button) to talk</button>
+    <img id="thumb" alt="Recall match">
   </section>
 </main>
 <script>
 const $ = id => document.getElementById(id);
-let ctx = null, ws = null, playing = null;
+let ctx = null, ws = null, sources = [], nextTime = 0;
 $("audio").onclick = () => { ctx = ctx || new AudioContext(); ctx.resume(); $("audio").textContent = "Audio on"; };
 
 function add(cls, text, meta) {
@@ -67,18 +81,93 @@ function add(cls, text, meta) {
   $("log").appendChild(d); $("log").scrollTop = 1e9;
 }
 
+// Non-urgent replies queue (sentence 2 waits for sentence 1); urgent clears the queue and plays now.
 function play(b64, rate, urgent) {
   if (!ctx || !b64) return;
   const bin = atob(b64), n = bin.length >> 1, buf = ctx.createBuffer(1, n, rate), ch = buf.getChannelData(0);
   for (let i = 0; i < n; i++) { let v = bin.charCodeAt(2*i) | (bin.charCodeAt(2*i+1) << 8); if (v > 32767) v -= 65536; ch[i] = v / 32768; }
-  if (urgent && playing) { try { playing.stop(); } catch {} }
-  const src = ctx.createBufferSource(); src.buffer = buf; src.connect(ctx.destination); src.start(); playing = src;
+  if (urgent) { sources.forEach(s => { try { s.stop(); } catch {} }); sources = []; nextTime = 0; if (window.speechSynthesis) speechSynthesis.cancel(); }
+  const src = ctx.createBufferSource(); src.buffer = buf; src.connect(ctx.destination);
+  const at = Math.max(ctx.currentTime, nextTime); src.start(at); nextTime = at + buf.duration;
+  sources.push(src); src.onended = () => { sources = sources.filter(s => s !== src); };
 }
 
-function speakFallback(text) {   // when core has no TTS key, use the browser voice so judges still hear it
+function speakFallback(text, urgent) {   // when core has no TTS audio, use the browser voice so judges still hear it
   if (!("speechSynthesis" in window)) return;
-  speechSynthesis.cancel(); speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+  if (urgent) speechSynthesis.cancel();
+  speechSynthesis.speak(new SpeechSynthesisUtterance(text));
 }
+
+// ---- live frame + hazard box ----
+let hboxTimer = null;
+function showBox(box) {
+  if (!box) return;
+  const h = $("hbox"); const [x1, y1, x2, y2] = box;
+  Object.assign(h.style, { left: x1*100+"%", top: y1*100+"%", width: (x2-x1)*100+"%", height: (y2-y1)*100+"%", display: "block" });
+  clearTimeout(hboxTimer); hboxTimer = setTimeout(() => h.style.display = "none", 1000);
+}
+
+// ---- status pills from /health ----
+async function pollHealth() {
+  try {
+    const h = await (await fetch("/health")).json();
+    const pills = [
+      ["phone", h.phones_connected > 0, h.phones_connected > 0 ? "phone" : "headless"],
+      ["STT", h.stt], ["TTS", h.tts, "TTS " + h.tts_cached], ["Claude", h.claude], ["Jev", h.jev],
+      ["hazards", h.hazards, h.hazards ? `hazards ${h.hazard_infer_ms ?? "?"} ms` : "hazards off"],
+      ["memory", h.memory.up], ["browser", h.browser.up],
+    ];
+    $("pills").innerHTML = "";
+    for (const [name, on, label] of pills) {
+      const p = document.createElement("span"); p.className = "pill " + (on ? "on" : "off"); p.textContent = label || name;
+      $("pills").appendChild(p);
+    }
+    if (h.demo_mode) { const p = document.createElement("span"); p.className = "pill on"; p.textContent = "demo mode"; $("pills").appendChild(p); }
+  } catch {}
+}
+setInterval(pollHealth, 3000); pollHealth();
+
+// ---- laptop push-to-talk: Space or the button, 16 kHz pcm16 in ~100 ms chunks ----
+let mic = null, talking = false, pending = [];
+async function startTalk() {
+  if (talking || !ws || ws.readyState !== 1) return;
+  talking = true; $("talk").classList.add("on"); $("talk").textContent = "Listening… release to send";
+  ctx = ctx || new AudioContext(); ctx.resume();
+  try {
+    if (!mic) {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      const srcNode = ctx.createMediaStreamSource(stream), proc = ctx.createScriptProcessor(4096, 1, 1);
+      proc.onaudioprocess = e => { if (talking) pushAudio(e.inputBuffer.getChannelData(0), ctx.sampleRate); };
+      srcNode.connect(proc); proc.connect(ctx.destination);   // ScriptProcessor needs a sink; output stays silent
+      mic = { stream, proc };
+    }
+  } catch (err) { add("say", "Microphone unavailable: " + err.message); stopTalk(); return; }
+  pending = [];
+  ws.send(JSON.stringify({ ptt: "down" }));
+}
+function pushAudio(f32, rate) {
+  const ratio = rate / 16000, n = Math.floor(f32.length / ratio);
+  for (let i = 0; i < n; i++) { const s = Math.max(-1, Math.min(1, f32[Math.floor(i * ratio)])); pending.push(s < 0 ? s * 32768 : s * 32767); }
+  while (pending.length >= 1600) sendChunk(pending.splice(0, 1600));
+}
+function sendChunk(samples) {
+  const pcm = new Int16Array(samples), bytes = new Uint8Array(pcm.buffer); let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  ws.send(JSON.stringify({ audio: btoa(bin), rate: 16000 }));
+}
+function stopTalk() {
+  if (!talking) return;
+  talking = false; $("talk").classList.remove("on"); $("talk").textContent = "Hold Space (or this button) to talk";
+  if (pending.length && ws && ws.readyState === 1) sendChunk(pending.splice(0));
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ ptt: "up" }));
+}
+document.addEventListener("keydown", e => { if (e.code === "Space" && document.activeElement !== $("t") && !e.repeat) { e.preventDefault(); startTalk(); } });
+document.addEventListener("keyup", e => { if (e.code === "Space" && document.activeElement !== $("t")) { e.preventDefault(); stopTalk(); } });
+$("talk").addEventListener("mousedown", startTalk);
+$("talk").addEventListener("mouseup", stopTalk);
+$("talk").addEventListener("mouseleave", stopTalk);
+$("talk").addEventListener("touchstart", e => { e.preventDefault(); startTalk(); });
+$("talk").addEventListener("touchend", e => { e.preventDefault(); stopTalk(); });
 
 function connect() {
   ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/mirror/ws");
@@ -93,11 +182,14 @@ function connect() {
       case "stt": $("l-stt").textContent = m.ms; break;
       case "intent": $("intent").textContent = m.intent; $("src").textContent = "via " + m.source; $("l-route").textContent = m.ms; break;
       case "handled": $("l-handled").textContent = m.ms; break;
-      case "hazard": $("l-hazard").textContent = m.lag_ms; break;
+      case "hazard": $("l-hazard").textContent = m.lag_ms; showBox(m.box); break;
+      case "frame": $("frame").src = "data:image/jpeg;base64," + m.jpeg_b64; $("frame").style.visibility = "visible"; break;
+      case "recall": if (m.thumb_url) { $("thumb").src = m.thumb_url; $("thumb").style.display = "block"; } break;
+      case "turn": if (m.first_audio_ms != null) $("l-first").textContent = m.first_audio_ms; break;
       case "say":
         add(m.urgent ? "hazard" : "say", m.text, m.urgent ? "urgent" : null);
         $("l-tts").textContent = m.tts_ms;
-        if (m.pcm16_b64) play(m.pcm16_b64, m.rate, m.urgent); else if (ctx) speakFallback(m.text);
+        if (m.pcm16_b64) play(m.pcm16_b64, m.rate, m.urgent); else if (ctx) speakFallback(m.text, m.urgent);
         break;
     }
   };
