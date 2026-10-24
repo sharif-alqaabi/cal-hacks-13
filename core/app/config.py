@@ -26,6 +26,7 @@ CARTESIA_TTS_MODEL = os.getenv("CARTESIA_TTS_MODEL", "sonic-3.5")
 CARTESIA_VOICE_ID = os.getenv("CARTESIA_VOICE_ID", "")
 TTS_RATE = int(os.getenv("TTS_RATE", "24000"))
 TTS_TIMEOUT_S = float(os.getenv("TTS_TIMEOUT_S", "4"))
+TTS_SPEED = float(os.getenv("TTS_SPEED", "1.75"))  # Cartesia does 0.6 to 1.5; above that we time-stretch
 STT_FINISH_TIMEOUT_S = float(os.getenv("STT_FINISH_TIMEOUT_S", "3"))
 STT_KEYTERMS = [k.strip() for k in os.getenv("STT_KEYTERMS", "").split(",") if k.strip()]
 SAY_SPLIT = _bool("SAY_SPLIT", True)   # one say per sentence; false joins a reply into one say (Q2)
