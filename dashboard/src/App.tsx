@@ -70,32 +70,32 @@ export default function App() {
 
   return (
     <MotionConfig reducedMotion="user">
-      <header className="sticky top-0 z-20 border-b border-border/70 bg-background/85 backdrop-blur-md" style={{ height: 'var(--header-h)' }}>
-        <div className="mx-auto flex h-full max-w-[1520px] items-center justify-between gap-3 px-5 sm:px-8 xl:px-12">
+      <header className="sticky top-0 z-20 border-b border-border bg-background/90 backdrop-blur" style={{ height: 'var(--header-h)' }}>
+        <div className="mx-auto flex h-full max-w-[1400px] items-center justify-between gap-3 px-5 sm:px-8">
           <div className="flex items-center gap-2.5">
-            <span className="grid size-9 place-items-center rounded-full bg-[var(--tint-peach)]"><span className="size-3.5 rounded-full bg-primary" /></span>
-            <span className="text-lg font-extrabold tracking-tight">Memory</span>
+            <span className="size-2.5 rounded-full bg-foreground" aria-hidden />
+            <span className="text-[17px] font-semibold tracking-tight">Memory</span>
           </div>
           <StatusPill active={isActive} lastTs={moments[0]?.ts ?? null} />
         </div>
       </header>
-      <main className="mx-auto max-w-[1520px] px-5 pb-20 pt-8 sm:px-8 xl:px-12">
-        <section className="mb-8 flex flex-col gap-1">
-          <h1 className="text-[30px] font-extrabold leading-tight tracking-tight text-[var(--ink-peach)] sm:text-[38px]">{greeting()} 👋</h1>
-          <p className="text-[17px] font-semibold text-foreground/75">
+      <main className="mx-auto max-w-[1400px] px-5 pb-16 pt-8 sm:px-8">
+        <section className="mb-7 flex flex-col gap-1">
+          <h1 className="text-[26px] font-semibold leading-tight tracking-tight sm:text-[30px]">{greeting()}</h1>
+          <p className="text-base text-muted-foreground">
             {WEARER || 'Your loved one'} is sharing their day with you. Here's how it's going.
           </p>
         </section>
         <AlertBand alerts={alerts} thumb={latestFrame?.thumb ?? ''} onResolve={id => resolveAlert({ id }).catch(log('resolve failed'))} />
-        <div className="grid items-start gap-6 lg:grid-cols-12 xl:gap-8">
+        <div className="grid items-start gap-5 lg:grid-cols-12">
           {columns.map((c, i) => (
-            <div key={i} className={`flex min-w-0 flex-col gap-6 xl:gap-8 ${c.span}`}>
+            <div key={i} className={`flex min-w-0 flex-col gap-5 ${c.span}`}>
               {c.cards.map((card, j) => <div key={j}>{card}</div>)}
             </div>
           ))}
         </div>
-        <p className="mt-12 text-center text-sm font-semibold text-muted-foreground">
-          💛 {WEARER || 'They'} chose to share this with family, so you can help when it matters. Sharing can be paused from the glasses anytime.
+        <p className="mt-10 text-center text-[13px] text-muted-foreground">
+          {WEARER || 'They'} chose to share this with family, so you can help when it matters. Sharing can be paused from the glasses anytime.
         </p>
       </main>
     </MotionConfig>

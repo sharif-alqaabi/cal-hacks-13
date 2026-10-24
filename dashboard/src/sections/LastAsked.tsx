@@ -13,7 +13,7 @@ export function LastAsked({ recalls, ready }: { recalls: RecallRow[]; ready: boo
   const now = useNow(5000)
   const [latest, ...earlier] = recalls
   return (
-    <Panel title="What they asked" icon={MessageCircleQuestion} tint="sky" stamp={latest && ago(Number(latest.ts), now)}>
+    <Panel title="What they asked" icon={MessageCircleQuestion} tone="sky" stamp={latest && ago(Number(latest.ts), now)}>
       {!ready ? <Skeleton className="h-20 w-full" /> : !latest ? <p className="text-muted-foreground">No questions yet. When they ask the glasses something, you'll see it here.</p> : (
         <div aria-live="polite">
           <AnimatePresence mode="wait" initial={false}>
@@ -24,10 +24,10 @@ export function LastAsked({ recalls, ready }: { recalls: RecallRow[]; ready: boo
               exit={{ opacity: 0 }}
               transition={{ duration: 0.22, ease: EASE }}
             >
-              <p className="inline-block rounded-2xl rounded-bl-md bg-[var(--ink-sky)] px-4 py-2.5 text-[15px] font-semibold text-white">“{latest.question}”</p>
-              <div className="mt-3 flex items-start gap-4">
-                <p className="flex-1 rounded-2xl rounded-tl-md bg-[var(--tint-sky)] px-4 py-3 text-[16px] leading-snug">{latest.answer}</p>
-                {latest.thumbUrl && <Photo src={latest.thumbUrl} alt="" className="size-20 rounded-2xl" />}
+              <p className="text-sm text-muted-foreground">“{latest.question}”</p>
+              <div className="mt-2 flex items-start gap-4">
+                <p className="flex-1 text-[17px] leading-snug">{latest.answer}</p>
+                {latest.thumbUrl && <Photo src={latest.thumbUrl} alt="" className="size-20 rounded-xl" />}
               </div>
             </motion.div>
           </AnimatePresence>
@@ -43,9 +43,8 @@ export function LastAsked({ recalls, ready }: { recalls: RecallRow[]; ready: boo
                   exit={{ opacity: 0 }}
                   transition={{ duration: 0.22, ease: EASE }}
                 >
-                  <span className="size-1.5 shrink-0 translate-y-[-2px] rounded-full bg-[var(--ink-sky)]/60" aria-hidden />
-                  <span className="min-w-0 flex-1 truncate text-foreground/80">{r.question}</span>
-                  <span className="shrink-0 font-semibold text-[var(--ink-sky)]/70">{ago(Number(r.ts), now)}</span>
+                  <span className="min-w-0 flex-1 truncate text-muted-foreground">{r.question}</span>
+                  <span className="shrink-0 text-muted-foreground/70">{ago(Number(r.ts), now)}</span>
                 </motion.li>
               ))}
             </AnimatePresence>
