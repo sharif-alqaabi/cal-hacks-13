@@ -1,0 +1,9 @@
+[
+  {"q": "where are my keys", "expect": "counter"},
+  {"q": "what was Sam wearing", "expect": "red hoodie"},
+  {"q": "where is my passport", "expect": "drawer"},
+  {"q": "when did I leave the house", "expect_regex": "\\d{1,2}:\\d{2}"},
+  {"q": "what was on the bus sign", "expect": "22"},
+  {"q": "where are my glasses", "expect": "desk"},
+  {"q": "where is my umbrella", "expect": "haven't"}
+]
