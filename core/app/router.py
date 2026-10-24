@@ -3,10 +3,11 @@ import logging
 import re
 import time
 
-import httpx
+import asyncio
+from urllib.parse import urlsplit
 
 from contracts.intents import INTENTS
-from . import config, llm
+from . import config, llm, net
 
 log = logging.getLogger("core.router")
 
@@ -27,7 +28,7 @@ JEV_CRITERIA = {
     "signal": "Asks about a pedestrian signal, walk sign, traffic light or crosswalk",
     "recall": "Asks about something seen earlier, like where they left an object or what someone wore",
     "remember": "Introduces a person or asks to remember something",
-    "lost": "Says they are lost or need help from family",
+    "lost": "Says they are lost, need help, or want their family told where they are",
     "browser": "Wants a task done on the laptop or web, like sending an email",
     "confirm": "Answers yes or no to a pending draft",
     "task": "Work mode: checks whether a held item is the right one for an order",
@@ -65,16 +66,16 @@ async def jev_route(text: str, pending_confirm: bool = False) -> tuple[str, floa
             "criteria": JEV_CRITERIA,
         }},
     }
+    u = urlsplit(config.JEV_URL)
     try:
-        async with httpx.AsyncClient(timeout=config.JEV_TIMEOUT_S) as c:
-            r = await c.post(config.JEV_URL, json=body,
-                             headers={"Authorization": f"Bearer {config.TYPESAFE_API_KEY}"})
-            r.raise_for_status()
-            ans = r.json()["answers"]["intent"]
-            choice = ans.get("choice")
-            if choice not in INTENTS:
-                return None
-            return choice, float(ans.get("confidence") or 0.0)
+        r = await net.client(f"{u.scheme}://{u.netloc}", config.JEV_TIMEOUT_S).post(
+            u.path, json=body, headers={"Authorization": f"Bearer {config.TYPESAFE_API_KEY}"})
+        r.raise_for_status()
+        ans = r.json()["answers"]["intent"]
+        choice = ans.get("choice")
+        if choice not in INTENTS:
+            return None
+        return choice, float(ans.get("confidence") or 0.0)
     except Exception as e:
         log.warning("jev route failed: %s", e)
         return None
@@ -82,8 +83,10 @@ async def jev_route(text: str, pending_confirm: bool = False) -> tuple[str, floa
 
 async def claude_route(text: str) -> str | None:
     try:
-        out = await llm.ask(config.ROUTER_FALLBACK_MODEL, ROUTER_SYSTEM, text, max_tokens=5,
-                            timeout=config.ROUTER_FALLBACK_TIMEOUT_S)
+        # Sonnet 5.5 at low effort with its default thinking: p50 790 ms vs 945 ms with thinking turned off
+        # ("between_tools"), same 60/60 labels on the router test phrases.
+        out = await llm.ask(config.ROUTER_FALLBACK_MODEL, ROUTER_SYSTEM, text, max_tokens=16,
+                            timeout=config.ROUTER_FALLBACK_TIMEOUT_S, effort="low")
         label = out.strip().lower().split()[0].strip(".,")
         return label if label in INTENTS else None
     except Exception as e:
@@ -99,13 +102,22 @@ async def route(text: str, pending_confirm: bool = False) -> tuple[str, str, int
         return intent, source, int((time.perf_counter() - t0) * 1000)
 
     # A bare yes/no while a draft is waiting is always a confirm.
-    if pending_confirm and keyword_route(text) == "confirm":
+    hint = keyword_route(text)
+    if pending_confirm and hint == "confirm":
         return done("confirm", "keywords")
-    jev = await jev_route(text, pending_confirm)
-    if jev and jev[1] >= config.JEV_CONFIDENCE_THRESHOLD:
-        return done(jev[0], "jev")
-    if llm.available():
-        label = await claude_route(text)
-        if label:
-            return done(label, "claude")
-    return done(keyword_route(text), "keywords")
+    # Claude starts alongside Jev instead of after it, so an unsure Jev costs max(jev, claude), not the sum.
+    claude = asyncio.create_task(claude_route(text)) if llm.available() else None
+    try:
+        jev = await jev_route(text, pending_confirm)
+        # Jev saying "other" when the keywords name a real intent ("I need help") goes to Claude, which was
+        # right on all 30 test phrases; Jev put "I need help" in other at 0.65.
+        if jev and jev[1] >= config.JEV_CONFIDENCE_THRESHOLD and not (jev[0] == "other" and hint != "other"):
+            return done(jev[0], "jev")
+        if claude:
+            label = await claude
+            if label:
+                return done(label, "claude")
+        return done(hint, "keywords")
+    finally:
+        if claude and not claude.done():
+            claude.cancel()

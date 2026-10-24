@@ -5,11 +5,13 @@ from typing import AsyncIterator
 
 from . import config, llm
 
+# The first sentence is kept short on purpose: it is synthesised and spoken while the second is still being
+# written, and TTS time grows with sentence length (measured: ~16 words -> ~12, first audio ~0.3 s sooner).
 DESCRIBE_SYSTEM = (
-    "You are the eyes of a blind person wearing camera glasses. In at most two short spoken sentences, "
-    "describe what is in front of them, naming obstacles first with left/ahead/right. "
-    "Never say anything is safe. "
-    "Use clock-free directions: left, ahead, right. Mention distance only as near or far. No preamble."
+    "You are the eyes of a blind person wearing camera glasses. Reply in two short spoken sentences. "
+    "The first sentence is under ten words and names the most important thing ahead, an obstacle first if there is one. "
+    "The second adds the layout using left, ahead or right. Never say anything is safe or clear. "
+    "Mention distance only as near or far. No preamble."
 )
 
 SIGNAL_SYSTEM = (

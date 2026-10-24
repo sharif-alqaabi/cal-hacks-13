@@ -4,7 +4,8 @@ import base64
 import re
 from typing import AsyncIterator
 
-from anthropic import AsyncAnthropic, BadRequestError
+import httpx2
+from anthropic import AsyncAnthropic, BadRequestError, DefaultAsyncHttpxClient
 
 from . import config
 
@@ -22,7 +23,11 @@ def available() -> bool:
 def client() -> AsyncAnthropic | None:
     global _client
     if _client is None and config.ANTHROPIC_API_KEY:
-        _client = AsyncAnthropic(api_key=config.ANTHROPIC_API_KEY, max_retries=0)
+        # The SDK drops idle connections after 5 s, so nearly every demo turn paid a fresh TLS handshake
+        # (measured ~190 ms per call after a 7 s pause). Keep them for 5 minutes instead.
+        http = DefaultAsyncHttpxClient(limits=httpx2.Limits(max_connections=100, max_keepalive_connections=20,
+                                                            keepalive_expiry=300))
+        _client = AsyncAnthropic(api_key=config.ANTHROPIC_API_KEY, max_retries=0, http_client=http)
     return _client
 
 
@@ -67,21 +72,25 @@ def _learn_thinking(model: str, e: BadRequestError) -> bool:
 
 
 async def ask(model: str, system: str, text: str, jpeg_b64: str | None = None, max_tokens: int = 200,
-              timeout: float = 10) -> str:
+              timeout: float = 10, effort: str | None = None) -> str:
+    """effort set: leave thinking at the model default (adaptive) and pass that effort instead of turning it off."""
     c = client()
     if c is None:
         raise RuntimeError("ANTHROPIC_API_KEY not set")
     messages = [{"role": "user", "content": _content(text, jpeg_b64)}]
 
+    def opts() -> dict:
+        return {"output_config": {"effort": effort}} if effort else {"thinking": _thinking_off(model)}
+
     async def call():
         try:
             return await c.messages.create(model=model, max_tokens=max_tokens, system=system, messages=messages,
-                                           thinking=_thinking_off(model))
+                                           **opts())
         except BadRequestError as e:
-            if not _learn_thinking(model, e):
+            if effort or not _learn_thinking(model, e):
                 raise
             return await c.messages.create(model=model, max_tokens=max_tokens, system=system, messages=messages,
-                                           thinking=_thinking_off(model))
+                                           **opts())
 
     resp = await asyncio.wait_for(call(), timeout)
     return "".join(b.text for b in resp.content if b.type == "text").strip()
@@ -92,6 +101,16 @@ async def warm_up(models: list[str]) -> None:
     for m in dict.fromkeys(models):
         try:
             await ask(m, "Reply with one word.", "hi", max_tokens=5, timeout=10)
+        except Exception:
+            pass
+
+
+async def keep_warm() -> None:
+    """A free Models API read, so the kept-alive connection is still open when the next turn comes."""
+    c = client()
+    if c is not None:
+        try:
+            await c.models.retrieve(config.VISION_MODEL, timeout=3)
         except Exception:
             pass
 

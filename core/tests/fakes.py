@@ -56,7 +56,7 @@ class FakeLLM:
         self.delay = delay
         self.calls: list[str] = []
 
-    async def ask(self, model, system, text, jpeg_b64=None, max_tokens=200, timeout=10) -> str:
+    async def ask(self, model, system, text, jpeg_b64=None, max_tokens=200, timeout=10, effort=None) -> str:
         from app import router, vision
 
         await asyncio.sleep(self.delay)

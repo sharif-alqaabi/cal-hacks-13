@@ -28,6 +28,8 @@ THUMB_DIR = Path(__file__).resolve().parent / "thumbs"
 # shortcut: tuned on the 7 mock questions with real captions (real hits 0.5-1.0, a never-seen item 0.19); retune on real photos.
 MIN_SCORE = 0.3    # below this a hit doesn't count: "I haven't seen that."
 FAST_SCORE = 0.45  # at or above this an object/person/fact hit is answered from a template, without Sonnet
+WORKERS = int(os.getenv("CAPTION_WORKERS", "4"))
+PRUNE_EVERY_S = 3.0  # how often dashboard deletions are picked up; off the /recall path (it cost ~100-260 ms per recall)
 DUP_DIFF = 3.0     # mean grey-level difference (0-255) between 16x16 thumbnails under which a frame is a duplicate
 NOT_SEEN = "I haven't seen that."
 
@@ -170,7 +172,10 @@ class Service:
         self.ids = {m["id"] for m in rows}
         self.people = {p["name"]: p for p in await self.db.sql("SELECT * FROM person")}
         await self.index.open(self.moments)
-        self.tasks = [asyncio.create_task(self._worker()) for _ in range(2)]
+        # 4 workers: a caption takes ~4.7 s and core sends up to one frame a second while walking. With 2 the
+        # queue backed up (17 s to drain after a 10 s walk) and dropped frames, which could be the keys frame.
+        self.tasks = [asyncio.create_task(self._worker()) for _ in range(WORKERS)]
+        self.tasks.append(asyncio.create_task(self._prune_loop()))
         log.info("started: %d moments, %d people, test scenes %s", len(rows), len(self.people), TEST_SCENES)
 
     async def close(self) -> None:
@@ -230,9 +235,13 @@ class Service:
             if not name:
                 log.warning("remember: no name in %r", label)
                 return False
-            await self._set_person(name, clothing or "unknown", mid)
             cap = {**base, "scene": "", "objects": [], "text": [],
                    "people": [{"name": name, "clothing": clothing, "position": ""}]}
+            await asyncio.gather(  # independent writes: one round trip to SpacetimeDB instead of two in a row
+                self._set_person(name, clothing or "unknown", mid),
+                self._store({"id": mid, "ts": mid, "caption_json": json.dumps(cap),
+                             "thumb_url": self._thumb(mid, jpeg_b64), "place_note": r["place"]}))
+            return True
         else:
             f = r["fact"]
             if not known(f["item"]) or not known(f["statement"]):
@@ -247,7 +256,6 @@ class Service:
 
     async def recall(self, question: str) -> dict:
         now_ms = int(time.time() * 1000)
-        await self._prune()
         best = None
         hit = timeline_answer(question, self.moments)
         if hit:
@@ -285,6 +293,14 @@ class Service:
     def _entry(doc, moment: dict, now_ms: int) -> str:
         told = (doc.metadata or {}).get("kind") == "fact"
         return f"{'you told me' if told else 'seen'} {when_phrase(moment['ts'], now_ms)}: {doc.text}"
+
+    async def _prune_loop(self) -> None:
+        while True:
+            await asyncio.sleep(PRUNE_EVERY_S)
+            try:
+                await self._prune()
+            except Exception as e:
+                log.warning("prune failed: %r", e)
 
     async def _prune(self) -> None:
         """Forget moments deleted from the dashboard: SpacetimeDB is the source of truth."""

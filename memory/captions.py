@@ -7,6 +7,7 @@ import json
 import os
 
 import anthropic
+import httpx2
 
 CAPTION_MODEL = os.getenv("CAPTION_MODEL", "claude-haiku-5-5")
 ANSWER_MODEL = os.getenv("ANSWER_MODEL", "claude-haiku-5-5")  # claude-sonnet-5-5 also works, about 0.2 s slower and less steady
@@ -120,7 +121,11 @@ def client() -> anthropic.AsyncAnthropic:
     """Created on first use so importing this module never needs a key."""
     global _client
     if _client is None:
-        _client = anthropic.AsyncAnthropic()
+        # The SDK drops idle connections after 5 s, so a recall after a pause paid a new TLS handshake
+        # (~190 ms measured in core). Keep them for 5 minutes.
+        http = anthropic.DefaultAsyncHttpxClient(limits=httpx2.Limits(max_connections=100, max_keepalive_connections=20,
+                                                                      keepalive_expiry=300))
+        _client = anthropic.AsyncAnthropic(http_client=http)
     return _client
 
 
