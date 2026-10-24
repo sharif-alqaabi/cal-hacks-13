@@ -79,7 +79,15 @@ def test_tracked_object_warns_once_however_long_it_stays():
 def test_new_track_of_same_class_warns():
     t = HazardTracker(demo_mode=False)
     assert sum(bool(w) for w in run(t, grow(), tid=1, t0=100)) == 1
-    assert sum(bool(w) for w in run(t, grow(), tid=2, t0=104, cx=0.3)) == 1   # a second chair elsewhere
+    assert sum(bool(w) for w in run(t, grow(), tid=2, t0=112, cx=0.3)) == 1   # a second chair elsewhere
+
+
+def test_class_cooldown_silences_other_objects_of_same_class():
+    t = HazardTracker(demo_mode=False, cooldown_s=10)
+    assert sum(bool(w) for w in run(t, grow(), tid=1, t0=100)) == 1
+    assert not any(run(t, grow(), tid=2, t0=104, cx=0.3))                    # another chair within 10 s: quiet
+    assert sum(bool(w) for w in run(t, grow(), tid=3, t0=104, cls="bench")) == 1   # other classes unaffected
+    assert sum(bool(w) for w in run(t, grow(), tid=4, t0=111, cx=0.7)) == 1  # after 10 s chairs warn again
 
 
 def test_id_switch_in_place_does_not_rewarn():
@@ -92,5 +100,6 @@ def test_closing_in_fast_rewarns_same_track():
     t = HazardTracker(demo_mode=False)
     assert sum(bool(w) for w in run(t, grow(n=6), tid=1, t0=100)) == 1        # warns around area 0.07
     assert not any(run(t, [0.08] * 10, tid=1, t0=101.2))                      # lingering: quiet
-    out = run(t, grow(n=6, start=0.2, ratio=1.25), tid=1, t0=104)            # then rushing in
+    assert not any(run(t, grow(n=6, start=0.2, ratio=1.25), tid=1, t0=104))   # rushing in, but class cooldown
+    out = run(t, grow(n=6, start=0.35, ratio=1.25), tid=1, t0=112)           # rushing in again after 10 s
     assert sum(bool(w) for w in out) == 1

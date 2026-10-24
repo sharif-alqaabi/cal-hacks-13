@@ -47,7 +47,7 @@ SCENE_CHANGE_THRESHOLD = float(os.getenv("SCENE_CHANGE_THRESHOLD", "18"))
 HAZARDS_ENABLED = _bool("HAZARDS_ENABLED", True)
 YOLO_MODEL = os.getenv("YOLO_MODEL", "yolov8n.pt")
 HAZARD_FPS = float(os.getenv("HAZARD_FPS", "15"))   # YOLO+ByteTrack ~10 ms/frame on the Mac
-HAZARD_COOLDOWN_S = float(os.getenv("HAZARD_COOLDOWN_S", "10"))   # only when YOLO tracking is unavailable
+HAZARD_COOLDOWN_S = float(os.getenv("HAZARD_COOLDOWN_S", "10"))   # no repeat warning about the same class within this
 DEMO_MODE = _bool("DEMO_MODE", False)   # stricter hazard gating for a busy table
 HAZARD_IMGSZ = int(os.getenv("HAZARD_IMGSZ", "320"))
 

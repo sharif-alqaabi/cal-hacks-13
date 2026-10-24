@@ -2,8 +2,9 @@
 
 Warn when a person / bike / car / furniture box is large, in the walking path and growing
 (or very close). YOLO's ByteTrack gives each object an id; each tracked object is warned about once,
-and again only if it is closing in fast. Boxes without an id fall back to one warning per class per
-HAZARD_COOLDOWN_S.
+and again only if it is closing in fast. On top of that, after any warning about a class (say a chair)
+no other warning about that class is spoken for HAZARD_COOLDOWN_S (10 s), whichever object it is.
+Boxes without an id get one warning per class per HAZARD_COOLDOWN_S.
 
 HazardTracker.decide() is pure so it can be unit tested; HazardDetector wraps the model I/O.
 """
@@ -95,10 +96,11 @@ def direction_for(cx: float) -> str:
 @dataclass
 class HazardTracker:
     demo_mode: bool = field(default_factory=lambda: config.DEMO_MODE)
-    cooldown_s: float = field(default_factory=lambda: config.HAZARD_COOLDOWN_S)   # untracked boxes only
+    cooldown_s: float = field(default_factory=lambda: config.HAZARD_COOLDOWN_S)   # per-class quiet period
     history: dict[str, deque] = field(default_factory=dict)      # key -> deque[(t, area)]
     last_warned: dict[str, tuple[float, float]] = field(default_factory=dict)   # key -> (t, area)
     last_seen: dict[str, tuple[float, Box]] = field(default_factory=dict)       # key -> (t, box)
+    class_warned: dict[str, float] = field(default_factory=dict)   # cls -> t of the last warning about it
     last_box: Box | None = None
 
     @property
@@ -142,6 +144,8 @@ class HazardTracker:
             in_path = CENTER_BAND[0] <= b.cx <= CENTER_BAND[1] and b.y2 >= MIN_BOTTOM
             if not in_path or b.area < self.min_area:
                 continue
+            if now - self.class_warned.get(b.cls, -1e9) < self.cooldown_s:
+                continue
             past = self._past_area(b.key, now)
             growing = past is not None and past > 0 and b.area >= past * GROWTH
             if not (growing or b.area >= VERY_CLOSE):
@@ -169,6 +173,7 @@ class HazardTracker:
         if best is None:
             return None
         self.last_warned[best.key] = (now, best.area)
+        self.class_warned[best.cls] = now
         self.last_box = best
         return phrase(HAZARD_CLASSES[best.cls], direction_for(best.cx))
 
