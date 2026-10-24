@@ -5,3 +5,6 @@ node_modules/
 dist/
 memory/thumbs/
 *.tsbuildinfo
+browser/logs/
+browser/traces/
+.pytest_cache/

@@ -1,0 +1,8 @@
+{
+  "order_id": "12",
+  "items": [
+    {"name": "blue notebook", "description": "a blue spiral or bound notebook"},
+    {"name": "stapler", "description": "a desk stapler, any color"},
+    {"name": "roll of tape", "description": "a roll of clear or masking tape"}
+  ]
+}

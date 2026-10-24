@@ -1,0 +1,369 @@
+"""Runs browser tasks for /task and /confirm.
+
+Jev Ultrafast's own run() is predict-then-act with nothing in between. drive() splits it so every chosen action
+passes guard.is_irreversible() before it executes; a send-like action parks the task until /confirm.
+The agent is synchronous (CDP calls), so all browser work runs on one worker thread: tasks never overlap in Chrome.
+Every path returns a sentence to speak; nothing fails silently (PRD 4 B-7).
+"""
+import asyncio
+import logging
+import threading
+import time
+import uuid
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
+from functools import partial
+
+import agents
+import config
+import gmail
+import goals
+import guard
+import lookup
+import readback
+import tracelog
+from agents import StalePage
+
+log = logging.getLogger("browser.runner")
+
+EXEC = ThreadPoolExecutor(max_workers=1, thread_name_prefix="browser")
+
+CHROME_DOWN = "Chrome isn't connected to the assistant."
+NO_KEYS = "The browser agent's keys aren't set up."
+NOT_SIGNED_IN = "The laptop isn't signed in to email."
+EXPIRED = "That draft has expired. Please ask me again."
+CANCELLED = "Okay, I didn't send it. Nothing went out."
+BROKE = "Something went wrong in the browser."
+
+
+class Failed(Exception):
+    """Raised inside a flow with the sentence to speak."""
+
+    def __init__(self, say: str):
+        super().__init__(say)
+        self.say = say
+
+
+@dataclass
+class Outcome:
+    kind: str                    # parked | done | blocked | timeout | budget | error
+    action: dict | None = None
+    error: str = ""
+
+
+@dataclass
+class Task:
+    task_id: str
+    agent: object
+    plan: goals.EmailPlan
+    draft: gmail.Draft
+    created: float = field(default_factory=time.monotonic)
+
+
+class Store:
+    """One Chrome tab at a time: the newest agent replaces (and closes) the previous one."""
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.pending: dict[str, Task] = {}
+        self.current = None
+
+    def adopt(self, agent) -> None:
+        with self.lock:
+            old, self.current = self.current, agent
+        if old is not None and old is not agent:
+            _close(old)
+
+    def put(self, task: Task) -> None:
+        with self.lock:
+            self.pending = {task.task_id: task}
+
+    def pop(self, task_id: str) -> Task | None:
+        with self.lock:
+            task = self.pending.pop(task_id, None)
+        if task and time.monotonic() - task.created > config.TASK_TTL_S:
+            return None
+        return task
+
+    def close_current(self) -> None:
+        """Runs on the browser thread."""
+        with self.lock:
+            agent, self.current = self.current, None
+            self.pending.clear()
+        if agent is not None:
+            _close(agent)
+
+
+store = Store()
+
+
+def _close(agent) -> None:
+    try:
+        agent.close()
+    except Exception as e:
+        log.warning("closing tab failed: %r", e)
+
+
+# ---- the guarded loop --------------------------------------------------------
+
+def _action(page: dict, choice: str) -> dict | None:
+    return next((a for a in page.get("actions", []) if a.get("id") == choice), None)
+
+
+def drive(agent, task_id: str, deadline: float, max_steps: int | None = None) -> Outcome:
+    st = agent.state
+    steps = 0
+    while True:
+        if st["status"] == "done":
+            return Outcome("done")
+        if st["status"] == "blocked":
+            return Outcome("blocked")
+        if time.monotonic() >= deadline:
+            return Outcome("timeout")
+        if max_steps is not None and steps >= max_steps:
+            return Outcome("budget")
+        try:
+            agent.command("predict")
+        except StalePage:
+            continue
+        except Exception as e:
+            return Outcome("error", error=f"{type(e).__name__}: {e}")
+        d = st["decision"]
+        action = _action(st["page"], d["choice"])
+        label = action["label"] if action else d["choice"]
+        tracelog.emit(task_id, "predict", f"{d.get('operation', '')} {label}".strip(),
+                   p=round(float(d.get("confidence") or 0), 2), ms=d.get("latency_ms"))
+        if guard.is_irreversible(action):
+            st["decision"] = None
+            st["status"] = "ready"
+            guard.log("blocked", task_id, label=action["label"], url=st["page"].get("url", ""))
+            tracelog.emit(task_id, "guard", f"Held before \"{action['label']}\": waiting for a spoken yes")
+            return Outcome("parked", action=action)
+        try:
+            agent.command("act", {"fingerprint": st["page"]["fingerprint"]})
+        except StalePage:
+            st["decision"] = None
+            st["status"] = "ready"
+            try:
+                st["page"] = agent.browser.observe(screenshot=False)
+            except Exception as e:
+                return Outcome("error", error=f"{type(e).__name__}: {e}")
+            continue
+        except Exception as e:
+            return Outcome("error", error=f"{type(e).__name__}: {e}")
+        if action:
+            steps += 1
+            typed = st["history"][-1].get("text") if st["history"] else None
+            tracelog.emit(task_id, "act", f"{_verb(action)} {action['label']}" + (f": \"{typed}\"" if typed else ""))
+
+
+def _verb(action: dict) -> str:
+    return {"fill": "type in", "click": "press", "select": "choose", "scroll": "scroll", "wait": "wait"}.get(
+        action.get("kind", ""), action.get("kind", ""))
+
+
+# ---- spoken failures (B-7) ---------------------------------------------------
+
+def _error_say(error: str) -> str:
+    e = error.lower()
+    if "text_model_api_key" in e:
+        return "The browser agent can't type without its text model key."
+    if "typesafe_api_key" in e or "keyerror" in e:
+        return NO_KEYS
+    if "budget" in e:
+        return "That took too many steps."
+    if "model" in e or "http" in e or "typesafe" in e:
+        return "The browser agent's model isn't responding."
+    if "harness" in e or "daemon" in e or "cdp" in e:
+        return CHROME_DOWN
+    return BROKE
+
+
+def explain(outcome: Outcome, agent, site: str, email: bool) -> str:
+    tail = " Nothing was sent." if email else ""
+    st = getattr(agent, "state", None) or {}
+    if gmail.signed_out(st.get("page", {}).get("url", "")):
+        return NOT_SIGNED_IN + tail
+    hist = [h for h in st.get("history") or [] if h.get("kind") in {"fill", "click", "select"}]
+    last = f" after I {_verb(hist[-1])} {hist[-1]['action']}" if hist else ""
+    if outcome.kind == "timeout":
+        return f"I ran out of time on {site}{last}.{tail}"
+    if outcome.kind == "blocked":
+        return f"I got stuck on {site}{last}.{tail}"
+    if outcome.kind == "budget":
+        return f"I couldn't find that on {site}.{tail}"
+    return _error_say(outcome.error) + tail
+
+
+# ---- flows (run on the browser thread) ---------------------------------------
+
+def _start(task_id: str, url: str, goal: str, site: str):
+    if not agents.chrome_ready():
+        agents.reconnect_in_background()
+        raise Failed(CHROME_DOWN)
+    if not config.FAKE and not config.TYPESAFE_API_KEY:
+        raise Failed(NO_KEYS)
+    try:
+        agent = agents.make_agent(url, goal)
+    except Exception as e:
+        log.exception("could not start agent")
+        raise Failed(_error_say(f"{type(e).__name__}: {e}") if "key" in str(e).lower() else f"I couldn't open {site} in Chrome.")
+    store.adopt(agent)
+    try:
+        guard.install(agent.browser)
+    except Exception as e:
+        log.warning("DOM guard not installed (policy guard still on): %r", e)
+        tracelog.emit(task_id, "guard", "Page guard unavailable; action guard still on")
+    agents.activate(agent.browser)
+    return agent
+
+
+def email_draft(task_id: str, plan: goals.EmailPlan, deadline: float):
+    agent = _start(task_id, gmail.compose_url(plan if config.GMAIL_PREFILL else None), gmail.goal(plan), "Gmail")
+    if gmail.signed_out(agent.state["page"].get("url", "")):
+        raise Failed(f"{NOT_SIGNED_IN} Nothing was sent.")
+    out = drive(agent, task_id, deadline)
+    if out.kind not in {"parked", "done"}:
+        raise Failed(explain(out, agent, "Gmail", email=True))
+    draft = gmail.read_draft(agent.browser)
+    tracelog.emit(task_id, "draft", f"To: {', '.join(draft.emails) or draft.to_text or '(empty)'} | "
+                                 f"Subject: {draft.subject or '(none)'} | Body: {draft.body or '(empty)'}")
+    if not gmail.addressed_to(draft, plan.to_addr, plan.to_name):
+        raise Failed(f"The draft isn't addressed to {plan.to_name}, so I won't send it. Please ask me again.")
+    if not draft.body:
+        raise Failed("I couldn't write the message. Nothing was sent.")
+    return agent, draft
+
+
+def lookup_open(task_id: str, plan: goals.LookupPlan):
+    agent = _start(task_id, lookup.search_url(plan.query), lookup.goal(plan.query), "Google")
+    return agent, agent.state["page"].get("text", "")
+
+
+def lookup_more(agent, task_id: str, deadline: float):
+    out = drive(agent, task_id, deadline, max_steps=config.LOOKUP_MAX_STEPS)
+    try:
+        text = agent.browser.observe(screenshot=False).get("text", "")
+    except Exception:
+        text = agent.state.get("page", {}).get("text", "")
+    return out, text
+
+
+def send_and_verify(task: Task) -> str:
+    b, name = task.agent.browser, task.plan.to_name
+    try:
+        gmail.click_send(b)
+    except gmail.SendError as e:
+        guard.log("send_failed", task.task_id, reason=e.say)
+        tracelog.emit(task.task_id, "fail", e.say)
+        return f"{e.say} Nothing was sent."
+    guard.log("sent", task.task_id, to=task.plan.to_addr, subject=task.draft.subject)
+    tracelog.emit(task.task_id, "act", "press Send (after spoken yes)")
+    ok = gmail.verify_sent(b, task.draft, name, task.plan.to_addr)
+    guard.log("verified" if ok else "unverified", task.task_id)
+    tracelog.emit(task.task_id, "verify", "Found it in the Sent folder" if ok else "Not found in the Sent folder")
+    if ok:
+        return f"Sent to {name}. I checked your Sent folder."
+    return "I pressed send, but I can't find it in your Sent folder yet. Please check before resending."
+
+
+def cancel(task: Task) -> str:
+    guard.log("cancelled", task.task_id)
+    tracelog.emit(task.task_id, "act", "No click: draft left unsent")
+    say = CANCELLED
+    if config.VERIFY_CANCEL:
+        clean = gmail.verify_absent(task.agent.browser, task.draft, task.plan.to_name, task.plan.to_addr)
+        if clean is False:
+            guard.log("violation", task.task_id, subject=task.draft.subject)
+            say = "Warning: that email is in your Sent folder."
+        elif clean:
+            guard.log("cancel_verified", task.task_id)
+        tracelog.emit(task.task_id, "verify", {True: "Sent folder is clean", False: "Found in Sent folder!",
+                                            None: "Sent folder didn't load"}[clean])
+    store.close_current()
+    return say
+
+
+# ---- async entry points --------------------------------------------------------
+
+async def _in_browser(fn, *args, timeout: float):
+    loop = asyncio.get_running_loop()
+    return await asyncio.wait_for(loop.run_in_executor(EXEC, partial(fn, *args)), max(timeout, 1.0))
+
+
+def _reply(task_id: str, say: str, needs_confirm: bool = False) -> dict:
+    return {"task_id": task_id, "say": say, "needs_confirm": needs_confirm}
+
+
+async def run_task(goal: str) -> dict:
+    task_id = uuid.uuid4().hex[:8]
+    t0 = time.monotonic()
+    deadline = t0 + config.TASK_BUDGET_S
+    tracelog.emit(task_id, "goal", goal)
+    plan = await goals.parse(goal)
+    email = isinstance(plan, goals.EmailPlan)
+    try:
+        if isinstance(plan, goals.Unsupported):
+            tracelog.emit(task_id, "fail", plan.say)
+            return _reply(task_id, plan.say)
+        await _in_browser(store.close_current, timeout=5)
+        left = lambda: deadline - time.monotonic() + 4   # noqa: E731  the loop stops at the deadline; this is slack
+        if email:
+            if not plan.message:
+                return _reply(task_id, f"What should the email to {plan.to_name} say?")
+            if not plan.to_addr:
+                return _reply(task_id, f"I don't have an email address for {plan.to_name}.")
+            tracelog.emit(task_id, "plan", f"Email {plan.to_name} <{plan.to_addr}>: \"{plan.subject}\" / {plan.message}")
+            agent, draft = await _in_browser(email_draft, task_id, plan, deadline, timeout=left())
+            say = readback.compose(plan.to_name, draft.subject, await readback.body_line(draft.body))
+            store.put(Task(task_id, agent, plan, draft))
+            tracelog.emit(task_id, "readback", say, ms=int((time.monotonic() - t0) * 1000))
+            return _reply(task_id, say, needs_confirm=True)
+
+        tracelog.emit(task_id, "plan", f"Look up: {plan.query}")
+        agent, text = await _in_browser(lookup_open, task_id, plan, timeout=left())
+        ans = await lookup.answer(plan.query, text)
+        if not ans:
+            out, text = await _in_browser(lookup_more, agent, task_id, deadline, timeout=left())
+            ans = await lookup.answer(plan.query, text)
+            if not ans:
+                say = (explain(out, agent, "Google", email=False) if out.kind in {"error", "timeout", "blocked"}
+                       else f"I couldn't find the answer. I searched Google for {plan.query}.")
+                tracelog.emit(task_id, "fail", say)
+                return _reply(task_id, say)
+        tracelog.emit(task_id, "answer", ans, ms=int((time.monotonic() - t0) * 1000))
+        return _reply(task_id, ans)
+    except Failed as f:
+        tracelog.emit(task_id, "fail", f.say)
+        return _reply(task_id, f.say)
+    except asyncio.TimeoutError:
+        say = "I ran out of time on Gmail. Nothing was sent." if email else "I ran out of time looking that up."
+        tracelog.emit(task_id, "fail", say)
+        return _reply(task_id, say)
+    except Exception:
+        log.exception("task failed")
+        say = BROKE + (" Nothing was sent." if email else "")
+        tracelog.emit(task_id, "fail", say)
+        return _reply(task_id, say)
+
+
+async def confirm(task_id: str, yes: bool) -> str:
+    task = store.pop(task_id)
+    if task is None:
+        tracelog.emit(task_id, "fail", EXPIRED)
+        return EXPIRED
+    guard.log("confirm", task_id, yes=yes)
+    tracelog.emit(task_id, "confirm", "Heard yes: sending" if yes else "Heard cancel: not sending")
+    try:
+        if yes:
+            return await _in_browser(send_and_verify, task, timeout=config.CONFIRM_BUDGET_S)
+        return await _in_browser(cancel, task, timeout=config.CONFIRM_BUDGET_S)
+    except asyncio.TimeoutError:
+        if yes:
+            return "I couldn't confirm the email went out. Please check your Sent folder before resending."
+        return CANCELLED
+    except Exception:
+        log.exception("confirm failed")
+        if yes:
+            return "Something went wrong while sending. Please check your Sent folder before resending."
+        return CANCELLED
