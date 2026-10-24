@@ -1,0 +1,92 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+/* Dark only. Names follow shadcn so the shadcn and 21st.dev components pick them up. Red (--alert) means
+   "act now" and appears nowhere else; green (--live) is only the connection dot. */
+:root {
+  color-scheme: dark;
+  --background: #0a0a0b;
+  --foreground: #ededef;
+  --card: #131315;
+  --card-foreground: #ededef;
+  --popover: #131315;
+  --popover-foreground: #ededef;
+  --primary: #ededef;
+  --primary-foreground: #0a0a0b;
+  --secondary: #1a1a1d;
+  --secondary-foreground: #ededef;
+  --muted: #1a1a1d;
+  --muted-foreground: #9a9aa3;
+  --accent: #1f1f23;
+  --accent-foreground: #ededef;
+  --destructive: #ff5a47;
+  --border: rgb(255 255 255 / 0.08);
+  --input: rgb(255 255 255 / 0.12);
+  --ring: #a1a1aa;
+  --raised: #1a1a1d;
+  --border-strong: rgb(255 255 255 / 0.16);
+  --alert: #ff5a47;
+  --live: #3dd68c;
+  --radius: 0.875rem;
+  --header-h: 56px;
+
+  --place-home: #8fb996;
+  --place-outside: #8aa4c8;
+  --place-store: #d4a95f;
+  --place-office: #a3a3ad;
+  --place-transit: #b39ddb;
+  --place-other: #a3a3ad;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-raised: var(--raised);
+  --color-alert: var(--alert);
+  --color-live: var(--live);
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-xl: calc(var(--radius) + 4px);
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+}
+
+@layer base {
+  * { @apply border-border; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    min-height: 100dvh;
+    overflow-x: hidden;
+    font-size: 15px;
+    line-height: 1.5;
+    font-variant-numeric: tabular-nums;
+  }
+  button { touch-action: manipulation; }
+}
+
+/* The only CSS animation: the status dot breathes while frames are arriving. */
+@keyframes breathe {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.8); }
+}
+.breathe { animation: breathe 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+@media (prefers-reduced-motion: reduce) { .breathe { animation: none; } }
