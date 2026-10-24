@@ -6,7 +6,7 @@ Pydantic models in this folder are the source of truth. Ping Eng 2 before changi
 
 | Direction | type | Fields |
 |---|---|---|
-| phone -> core | `frame` | `{ts, jpeg_b64, w, h, snap_id?}` ~5 fps, 640x480, JPEG q~70 |
+| phone -> core | `frame` | `{ts, jpeg_b64, w, h, snap_id?}` ~15 fps, 640x480, JPEG q~70 |
 | phone -> core | `audio` | `{ts, pcm16_b64, rate}` |
 | phone -> core | `ptt` | `{state: "down" \| "up"}` |
 | phone -> core | `text` | `{text}` dev/demo only, skips STT |

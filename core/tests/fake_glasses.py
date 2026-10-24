@@ -139,7 +139,7 @@ if __name__ == "__main__":
     p.add_argument("--camera", type=int, default=0)
     p.add_argument("--video")
     p.add_argument("--images")
-    p.add_argument("--fps", type=float, default=5)
+    p.add_argument("--fps", type=float, default=15)
     p.add_argument("--rate", type=int, default=8000, choices=[8000, 16000])
     try:
         asyncio.run(main(p.parse_args()))

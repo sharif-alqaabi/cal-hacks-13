@@ -203,7 +203,8 @@ class HazardDetector:
                 from ultralytics.utils import IterableSimpleNamespace, YAML
                 from ultralytics.utils.checks import check_yaml
                 cfg = IterableSimpleNamespace(**YAML.load(check_yaml("bytetrack.yaml")))
-                self.bytetrack = BYTETracker(cfg)   # track_buffer 30 frames = 6 s at 5 fps
+                cfg.track_buffer = round(6 * config.HAZARD_FPS)   # keep lost tracks ~6 s at any rate
+                self.bytetrack = BYTETracker(cfg)
             except Exception as e:
                 log.warning("ByteTrack unavailable, per-class cooldown instead: %s", e)
             log.info("YOLO loaded: %s, inference %d ms", path, self.infer_ms)

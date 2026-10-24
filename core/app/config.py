@@ -45,12 +45,12 @@ SCENE_CHANGE_THRESHOLD = float(os.getenv("SCENE_CHANGE_THRESHOLD", "18"))
 
 HAZARDS_ENABLED = _bool("HAZARDS_ENABLED", True)
 YOLO_MODEL = os.getenv("YOLO_MODEL", "yolov8n.pt")
-HAZARD_FPS = float(os.getenv("HAZARD_FPS", "5"))
+HAZARD_FPS = float(os.getenv("HAZARD_FPS", "15"))   # YOLO+ByteTrack ~10 ms/frame on the Mac
 HAZARD_COOLDOWN_S = float(os.getenv("HAZARD_COOLDOWN_S", "10"))   # only when YOLO tracking is unavailable
 DEMO_MODE = _bool("DEMO_MODE", False)   # stricter hazard gating for a busy table
 HAZARD_IMGSZ = int(os.getenv("HAZARD_IMGSZ", "320"))
 
-MIRROR_FRAME_FPS = float(os.getenv("MIRROR_FRAME_FPS", "2"))
+MIRROR_FRAME_FPS = float(os.getenv("MIRROR_FRAME_FPS", "15"))
 
 ROOT = Path(__file__).resolve().parent.parent
 CACHE_DIR = Path(os.getenv("CACHE_DIR", str(ROOT / "cache")))

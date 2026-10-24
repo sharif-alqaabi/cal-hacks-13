@@ -3,23 +3,28 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { placeLabel, upper } from '@/caption'
 import { ago } from '@/format'
-import { useNow } from '@/hooks'
+import { useLiveFrame, useNow } from '@/hooks'
 import type { Moment } from '@/thread'
 import { Panel } from './Panel'
 import { Photo } from './Photo'
 
-/** What the glasses see right now: the newest frame, where it is, and what's in view. */
+/** What the glasses see right now: the live camera feed (or the newest captioned frame), where it is, and what's in view. */
 const PLACE_INK = { home: 1, outside: 1, store: 1, office: 1, transit: 1 }
 
 export function Now({ moment, ready }: { moment?: Moment; ready: boolean }) {
   const now = useNow(1000)
+  const frame = useLiveFrame()
+  const live = frame !== null && now - frame.at < 3000
+  const view = live
+    ? <img src={frame.src} alt="Live view from the glasses" className="aspect-[4/3] w-full rounded-[18px] bg-raised object-cover" />
+    : null
   if (!ready) return <Panel title="Right now" icon={Eye} tint="peach"><Skeleton className="aspect-[4/3] w-full rounded-[18px]" /></Panel>
-  if (!moment) return <Panel title="Right now" icon={Eye} tint="peach"><p className="text-muted-foreground">Nothing to show yet. A picture appears here once the glasses are on.</p></Panel>
+  if (!moment) return <Panel title="Right now" icon={Eye} tint="peach" stamp={live ? 'live' : undefined}>{view ?? <p className="text-muted-foreground">Nothing to show yet. A picture appears here once the glasses are on.</p>}</Panel>
   const { cap } = moment
   const where = [...new Set([upper(cap.placeDetail), placeLabel(cap.place)].filter(Boolean))].join(' · ')
   return (
-    <Panel title="Right now" icon={Eye} tint="peach" stamp={ago(moment.ts, now)}>
-      <Photo src={moment.thumb} alt={cap.scene || 'Latest view from the glasses'} className="aspect-[4/3] w-full rounded-[18px]" />
+    <Panel title="Right now" icon={Eye} tint="peach" stamp={live ? 'live' : ago(moment.ts, now)}>
+      {view ?? <Photo src={moment.thumb} alt={cap.scene || 'Latest view from the glasses'} className="aspect-[4/3] w-full rounded-[18px]" />}
       <p className="mt-4 text-xl font-extrabold leading-snug" style={{ color: `var(--place-${cap.place in PLACE_INK ? cap.place : 'other'})` }}>{where}</p>
       {cap.scene && <p className="mt-1.5 leading-relaxed text-foreground/75">{cap.scene}</p>}
       {cap.objects.length > 0 && (
