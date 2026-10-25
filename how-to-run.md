@@ -84,7 +84,7 @@ Every phrase below was run through the live router on 2026-10-24 and landed on i
 | describe | Describes the current view | "What's in front of me?" · "Describe what's around me." · "What do you see in front of me?" |
 | signal | Reads a pedestrian signal | "Is the walk sign on?" · "Can I cross at this crosswalk?" · "What color is the traffic light?" |
 | remember | Saves a person or a fact with the current frame | "This is my friend Kevin." · "Meet my friend Sam." · "Remember that my keys are in the top drawer." |
-| recall | Answers from memory | "Where did I put my keys?" · "What was Kevin wearing?" · "Where are my glasses?" · "When did I leave home?" *(slower)* |
+| recall | Answers from memory | "Where did I put my keys?" · "Do you know where my keys are?" · "What was Kevin wearing?" · "What else was on the table?" · "Where are my glasses?" · "When did I leave home?" *(slower)* |
 | lost | Alerts the family dashboard | "I'm lost." · "Help me, I'm lost." · "I need help." |
 | browser | Starts a laptop/web task | "Email my mom that I'm running late." · "Send an email to Sam saying I'll be there soon." · "Look up the hours for the nearest pharmacy." |
 | task | Work mode item check | "Is this the right item?" · "Check this against the order." · "Next item." *(slower)* |

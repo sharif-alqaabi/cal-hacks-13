@@ -17,7 +17,7 @@ KEYWORDS: list[tuple[str, str]] = [
     ("lost", r"\b(i'?m lost|i am lost|help me|help)\b"),
     ("signal", r"\b(signal|crosswalk|walk sign|walk|light|crossing)\b"),
     ("remember", r"\b(this is|remember (that|this)|meet my)\b"),
-    ("recall", r"\b(where (did|is|are)|what was|when did|did i|who is)\b"),
+    ("recall", r"\b(where (did|is|are|was)|what was|when did|did i|who (is|was)|do you know where|have you seen|do you remember|what else (was|were)|last (see|saw)|come across)\b"),
     ("browser", r"\b(email|e-mail|text|message|send|look up|search|book|youtube|videos?|pause|resume|unpause)\b"
                 r"|^(?:please )?(?:play|put on)\b"),
     ("task", r"\b(is this (the )?right|next item|order card|check this|order)\b"),
@@ -42,10 +42,16 @@ SITE_RX = re.compile(
     r"|^(?:can you |could you |please )*(?:open|close|start)\s+(?:up\s+)?(?:a |this |the |that |another |my )?"
     r"(?:new |blank |current )?(?:browser )?tab\b")
 
+# Past-tense wording means the answer is in memory, not in the camera ("what color was the car", "have you seen my
+# wallet", "did I leave the stove on"). Only overrides describe/other/recall, so "email Sam that I left 5 minutes ago",
+# "did the walk sign turn on" and "this is Sam, I saw him earlier" keep their own intents.
+PAST = re.compile(r"\b(did|didn'?t|was|wasn'?t|were|weren'?t|had|saw|seen|earlier|ago|yesterday|last (time|night|week))\b")
+PAST_OVERRIDES = {"describe", "other", "recall"}
+
 JEV_CRITERIA = {
-    "describe": "Wants to know what is around or in front of them",
+    "describe": "Wants to know what is around or in front of them right now, in the present ('what's in front of me?'). Never a question about earlier",
     "signal": "Asks about a pedestrian signal, walk sign, traffic light or crosswalk",
-    "recall": "Asks about something seen earlier, like where they left an object or what someone wore",
+    "recall": "Asks about anything from earlier, however it is phrased: where they left or last saw something, what else was somewhere, what someone looked like or wore, who they met or talked to, who someone is ('who is this?', since only memory knows names), 'do you know where my keys are', 'have you seen my wallet', 'do you remember', 'did I'",
     "remember": "Introduces a person or asks to remember something",
     "lost": "Says they are lost, need help, or want their family told where they are",
     "browser": "Wants a task done on the laptop or web, like sending an email, opening a website (\"go to Instagram\"), opening or closing a tab, "
@@ -58,7 +64,10 @@ JEV_CRITERIA = {
 ROUTER_SYSTEM = (
     "You classify a blind user's spoken request for their assistive glasses. "
     f"Reply with exactly one label from: {', '.join(INTENTS)}.\n"
-    "describe=what's around/in front; signal=pedestrian signal/crosswalk; recall=asking about something seen earlier; "
+    "describe=what's around/in front of them right now; signal=pedestrian signal/crosswalk; "
+    "recall=anything about earlier or the past, or who someone is (\"who is this?\": only memory knows names) "
+    "(where something was left or last seen, what else was somewhere, who they met, "
+    "what someone wore, \"do you know where my keys are\", \"have you seen\"); "
     "remember=introducing a person or asking to remember something; lost=lost or needs help; "
     "browser=email/web task on the laptop, including opening a website (go to Instagram, open nytimes.com), opening or closing a browser tab, and YouTube (find, play, pick a numbered result, pause, resume a video); confirm=yes/no answer to a pending draft; task=checking items in work mode; other=anything else."
 )
@@ -117,7 +126,7 @@ async def claude_route(text: str) -> str | None:
 
 
 async def route(text: str, pending_confirm: bool = False) -> tuple[str, str, int]:
-    """Returns (intent, source, ms) where source is jev|claude|keywords."""
+    """Returns (intent, source, ms) where source is jev|claude|keywords|tense."""
     t0 = time.perf_counter()
 
     def done(intent: str, source: str) -> tuple[str, str, int]:
@@ -130,13 +139,18 @@ async def route(text: str, pending_confirm: bool = False) -> tuple[str, str, int
     said = text.lower().replace("’", "'").strip().rstrip(".!?")
     if YOUTUBE_RX.search(said) or SITE_RX.match(said):
         return done("browser", "keywords")
+    # Past tense goes straight to memory, without waiting on Jev: the camera can't answer about earlier.
+    if hint in PAST_OVERRIDES and PAST.search(text.lower().replace("’", "'")):
+        return done("recall", "tense")
     # Claude starts alongside Jev instead of after it, so an unsure Jev costs max(jev, claude), not the sum.
     claude = asyncio.create_task(claude_route(text)) if llm.available() else None
     try:
         jev = await jev_route(text, pending_confirm)
         # Jev saying "other" when the keywords name a real intent ("I need help") goes to Claude, which was
         # right on all 30 test phrases; Jev put "I need help" in other at 0.65.
-        if jev and jev[1] >= config.JEV_CONFIDENCE_THRESHOLD and not (jev[0] == "other" and hint != "other"):
+        # Likewise "describe" when the words are about the past ("what else was on the table"): Jev reads those as a look at the scene.
+        if jev and jev[1] >= config.JEV_CONFIDENCE_THRESHOLD and not (
+                (jev[0] == "other" and hint != "other") or (jev[0] == "describe" and hint == "recall")):
             return done(jev[0], "jev")
         if claude:
             label = await claude

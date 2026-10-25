@@ -37,6 +37,43 @@ def test_keyword_router_accuracy():
     assert len(wrong) <= 2, wrong
 
 
+def test_past_questions_keyword_to_recall():
+    for t in ("do you know where my house keys are", "have you seen my wallet", "what else was on the picnic table",
+              "do you remember the guy I was talking to", "did I come across a guy just now",
+              "when did I last see my house keys", "who was I talking to", "where was I two hours ago"):
+        assert keyword_route(t) == "recall", t
+    assert keyword_route("what's in front of me") == "describe"
+    assert keyword_route("what do you see in front of me") == "describe"
+    assert keyword_route("email Sam that I left 5 minutes ago") == "browser"
+
+
+def test_jev_describe_with_past_words_asks_claude(fake, monkeypatch):
+    async def sure_describe(text, pending_confirm=False):
+        return "describe", 0.9
+    monkeypatch.setattr(router, "jev_route", sure_describe)
+    intent, source, _ = asyncio.run(router.route("do you know where my keys are"))  # present tense, so Jev is asked
+    assert (intent, source) == ("recall", "claude")
+    intent, source, _ = asyncio.run(router.route("what's in front of me"))
+    assert (intent, source) == ("describe", "jev")  # a real describe still takes Jev's answer
+
+
+def test_past_tense_goes_to_recall_before_jev(fake, monkeypatch):
+    async def wrong(text, pending_confirm=False):
+        return "describe", 0.99
+    monkeypatch.setattr(router, "jev_route", wrong)
+    for t in ("what color was the car that just passed me", "have you seen my wallet", "what did the sign say",
+              "did I leave the stove on", "what was on the table earlier", "who were the people at the cafe",
+              "what else was on the picnic table", "how long ago did I see Kevin"):
+        assert asyncio.run(router.route(t))[:2] == ("recall", "tense"), t
+    # Other intents keep their own route even with a past-tense word in them.
+    assert keyword_route("email Sam that I left 5 minutes ago and was late") == "browser"
+    assert keyword_route("did the walk sign turn on") == "signal"
+    assert keyword_route("I'm lost, I was at the bus stop") == "lost"
+    assert keyword_route("this is my friend Sam, I saw him earlier") == "remember"
+    # Present tense still asks Jev.
+    assert asyncio.run(router.route("what's in front of me"))[:2] == ("describe", "jev")
+
+
 def test_confirm_short_circuit_when_pending(fake):
     intent, source, _ = asyncio.run(router.route("yes send it", pending_confirm=True))
     assert (intent, source) == ("confirm", "keywords")
@@ -71,7 +108,7 @@ def test_youtube_controls_short_circuit(fake):
 
 
 def test_jev_used_when_confident(fake):
-    intent, source, ms = asyncio.run(router.route("where did I put my keys"))
+    intent, source, ms = asyncio.run(router.route("where are my keys"))  # present tense: past tense skips Jev
     assert (intent, source) == ("recall", "jev") and ms >= 0
 
 
@@ -79,7 +116,7 @@ def test_jev_below_threshold_falls_back_to_claude(fake, monkeypatch):
     async def unsure(text, pending_confirm=False):
         return "other", 0.2
     monkeypatch.setattr(router, "jev_route", unsure)
-    intent, source, _ = asyncio.run(router.route("where did I put my keys"))
+    intent, source, _ = asyncio.run(router.route("where are my keys"))
     assert (intent, source) == ("recall", "claude")
 
 
