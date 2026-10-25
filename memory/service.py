@@ -16,7 +16,7 @@ from pathlib import Path
 from PIL import Image
 
 import captions
-from moss_index import MossIndex, known, parse_ref
+from moss_index import MossIndex, known, parse_ref, to_docs
 from stdb import Stdb
 
 log = logging.getLogger("memory")
@@ -42,6 +42,10 @@ LOOK_TIMEOUT_S = float(os.getenv("LOOK_TIMEOUT_S", "2.5"))
 # before anyone asked. "Just" questions also look at the newest frames, which may not match the caption search.
 VISUAL = re.compile(r"\b(?:colou?rs?|look(?:ed|s)? like|wearing|wore|shape|sign|logo|written|say|said|read|how (?:big|tall|large)|what kind|which)\b", re.I)
 JUST = re.compile(r"\b(?:just|a (?:moment|minute|second) ago|right now)\b", re.I)
+# A question that leans on the one before it ("and when did I last see them?"), checked only within FOLLOW_S of that answer.
+FOLLOW = re.compile(r"^(?:and|also|so|what about|how about|what else|who else)\b|"
+                    r"\b(?:it|its|them|they|those|that|there|then|he|him|his|she|her)\b", re.I)
+FOLLOW_S = 90
 
 LEAVE = re.compile(r"\bwhen did i (?:leave|left|exit|go out of|head out of|get out of)\b", re.I)
 ARRIVE = re.compile(r"\bwhen did i (?:arrive|reach|get (?:home|back|to)|come (?:home|back|in)|walk in)\b", re.I)
@@ -129,6 +133,12 @@ def look_frames(hit_ids: list[int], moments: list[dict], recent: bool, n: int = 
             picked += [moments[i]] + moments[max(0, i - 1):i] + moments[i + 1:i + 2]
     out = list({m["id"]: m for m in picked}.values())[:n]  # dict keeps first-seen order, so the best picks survive the cap
     return sorted(out, key=lambda m: m["ts"])
+
+
+def around(moment: dict, moments: list[dict], n: int = 1) -> list[dict]:
+    """The stored moments n before and n after this one, with it in the middle, oldest first; [] if it was forgotten."""
+    i = next((i for i, m in enumerate(moments) if m["id"] == moment["id"]), None)
+    return [] if i is None else moments[max(0, i - n):i + n + 1]
 
 
 def last_unnamed(moments: list[dict], ids: set[int] | None = None) -> tuple[dict, dict] | None:
@@ -240,6 +250,8 @@ class Service:
         self.ids: set[int] = set()           # every moment id in use, so two frames in one ms can't collide
         self.queue: asyncio.Queue = asyncio.Queue(10)
         self.pending = 0                     # frames queued or being captioned; app.py shows it on /health
+        # shortcut: one conversation per service (one wearer); upgrade to one per session if several wearers share it.
+        self.last: dict | None = None        # the previous recall: ts (ms), question, answer, moment
         self.last_hash: bytes | None = None  # thumbnail of the last frame kept, for duplicate skipping
         self.last_place: tuple[float, str, str] = (0.0, "other", "")  # (ts, place, place_detail) of the newest captioned frame
         self.tasks: list[asyncio.Task] = []
@@ -373,27 +385,36 @@ class Service:
         now_ms = int(time.time() * 1000)
         best = None
         hit = timeline_answer(question, self.moments)
+        follow = bool(self.last and now_ms - self.last["ts"] <= FOLLOW_S * 1000 and FOLLOW.search(question))
+        anchor = self.last["anchor"] if follow else question
         if hit:
             answer, best = hit
         else:
-            docs = (await self.index.search(question))[0] if self.moments else []  # nothing indexed yet: nothing to ask
+            # A follow-up searches with the question that started the chain, so "them" finds the keys again,
+            # and so does a second follow-up ("what else was on the counter" after "and when did I last see them").
+            query = f"{anchor} {question}" if follow else question
+            docs = (await self.index.search(query))[0] if self.moments else []  # nothing indexed yet: nothing to ask
             by_id = {m["id"]: m for m in self.moments}
             strong = [(d, by_id[parse_ref(d.id)[0]]) for d in docs
                       if d.score >= MIN_SCORE and parse_ref(d.id)[0] in by_id]
             log.info("recall %r top hits: %s", question, [(d.id, round(d.score, 2)) for d in docs[:3]])  # for tuning MIN/FAST_SCORE
             # Visual and "just" questions also send the saved frames: a caption was written before anyone asked.
             # Others with no strong hit stay "not seen" without a call (e2e: a never-seen umbrella got "the closest is a raincoat").
-            shots = self._frames(question, docs, now_ms) if VISUAL.search(question) or JUST.search(question) else []
+            shots = self._frames(question, docs, now_ms, self.last["moment"] if follow else None) \
+                if VISUAL.search(question) or JUST.search(question) else []
             answer, tpl, named = None, None, []
             if strong:
                 doc, best, named = pick(question, strong)
                 _, kind, idx = parse_ref(doc.id)
                 tpl = template(best, kind, idx, now_ms) if named else None  # no word match: Claude decides if it was seen
-                if tpl and doc.score >= FAST_SCORE and not shots:
+                if tpl and doc.score >= FAST_SCORE and not shots and not follow:  # a follow-up needs the model to resolve "it"
                     answer = tpl
             if answer is None:
                 ranked = named + [x for x in strong if x not in named]  # word-matched hits first, then by score
                 entries = [self._entry(d, m, now_ms) for d, m in sorted(ranked[:5], key=lambda x: -x[1]["ts"])]
+                if follow:
+                    entries = self._earlier(now_ms) + entries
+                    best = best or self.last["moment"]
                 try:
                     answer, picked = await self._ask(question, entries, shots)
                 except Exception as e:
@@ -402,13 +423,17 @@ class Service:
                     log.warning("answer failed, using the template: %r", e)
                     answer, picked = tpl, None
                 best = picked or best
+        self.last = {"ts": now_ms, "question": question, "answer": answer, "moment": best,
+                     "anchor": anchor if follow else question}
         thumb = (best or {}).get("thumb_url") or None
         self._bg(self.db.call("add_recall", now_ms, question, answer, thumb or ""))
         return {"answer": answer, "ts": best["ts"] / 1000 if best else None, "thumb_url": thumb}
 
-    def _frames(self, question: str, docs, now_ms: int) -> list[tuple[dict, tuple[str, str, str]]]:
-        """Saved frames to look at again: (moment, (when, jpeg_b64, what was noted)), oldest first."""
-        hit_ids = list(dict.fromkeys(parse_ref(d.id)[0] for d in docs if d.score >= LOOK_SCORE))
+    def _frames(self, question: str, docs, now_ms: int, earlier: dict | None = None) -> list[tuple[dict, tuple[str, str, str]]]:
+        """Saved frames to look at again: (moment, (when, jpeg_b64, what was noted)), oldest first. A follow-up
+        question puts the moment the previous answer came from first, so "what color was it" sees that scene."""
+        hit_ids = list(dict.fromkeys([*([earlier["id"]] if earlier else []),
+                                      *(parse_ref(d.id)[0] for d in docs if d.score >= LOOK_SCORE)]))
         shots = []
         for m in look_frames(hit_ids, self.moments, bool(JUST.search(question))) if self.moments else []:
             path = THUMB_DIR / f"{m['id']}.jpg"
@@ -433,6 +458,18 @@ class Service:
         if not entries:
             return NOT_SEEN, None
         return (await captions.answer(question, entries))["answer"].strip(), None
+
+    def _earlier(self, now_ms: int) -> list[str]:
+        """What a follow-up needs from the last turn: that question and answer, and everything stored about the moment
+        it came from and the ones either side (memory's copy of the moment table, so no extra round trip)."""
+        out = [f'earlier question: "{self.last["question"]}" and you answered: "{self.last["answer"]}"']
+        for m in around(self.last["moment"], self.moments) if self.last["moment"] else []:
+            docs = to_docs(m)
+            if docs:
+                told = (docs[0].metadata or {}).get("kind") == "fact"
+                out.append(f"{'you told me' if told else 'seen'} {when_phrase(m['ts'], now_ms)}: "
+                           + " ".join(d.text for d in docs))
+        return out
 
     @staticmethod
     def _entry(doc, moment: dict, now_ms: int) -> str:

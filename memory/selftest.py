@@ -159,6 +159,20 @@ def test_earlier() -> None:
     assert service.last_unnamed([]) is None
 
 
+def test_follow() -> None:
+    for q in ("and when did I last see them", "what else was there", "what color was it", "who else was with me",
+              "where did I leave it"):
+        assert service.FOLLOW.search(q), q
+    for q in ("where are my keys", "when did I leave the house", "where is my passport", "what bus did I take"):
+        assert not service.FOLLOW.search(q), q
+    ms = [moment(i, CAP, ts=i * MIN) for i in range(1, 6)]
+    ids = lambda xs: [m["id"] for m in xs]
+    assert ids(service.around(ms[2], ms)) == [2, 3, 4]  # the moment with one either side, oldest first
+    assert ids(service.around(ms[0], ms)) == [1, 2] and ids(service.around(ms[4], ms)) == [4, 5]  # the ends
+    assert ids(service.around(ms[2], ms, n=2)) == [1, 2, 3, 4, 5]
+    assert service.around(moment(99, CAP), ms) == []  # a moment that was forgotten
+
+
 def test_scenes() -> None:
     jpeg = drive.render_scene("A red door.")
     assert service.scene_of(jpeg) == "A red door."

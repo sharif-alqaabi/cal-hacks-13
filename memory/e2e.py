@@ -65,6 +65,12 @@ with TestClient(app) as c:
         ok = (q["expect"].lower() in answer.lower()) if "expect" in q else bool(re.search(q["expect_regex"], answer))
         check(ok, f"{q['q']!r} ({ms:.0f} ms) -> {answer}")
 
+    # A follow-up leans on the question before it: "them" has to mean the keys.
+    c.post("/recall", json={"question": "where are my keys"})
+    answer = c.post("/recall", json={"question": "and when did I last see them?"}).json()["answer"]
+    check(re.search(r"\d{1,2}:\d{2}|ago", answer) is not None and "haven't seen" not in answer,
+          f"follow-up 'and when did I last see them?' -> {answer}")
+
     # Naming someone from earlier: an unnamed man seen at the cafe, named later while the camera sees something else.
     cafe = drive.render_scene("Busy small cafe. A man in a grey beanie and an olive green jacket stands at the counter ordering "
                               "coffee. A menu board hangs above the counter.")
