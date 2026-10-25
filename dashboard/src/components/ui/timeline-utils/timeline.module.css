@@ -22,7 +22,7 @@
   justify-content: space-between;
   padding: 10px 0;
   background: var(--timeline-bg, var(--background));
-  color: var(--ink-sun);
+  color: var(--muted-foreground);
   font-size: 15px;
   font-weight: 800;
 }
@@ -80,7 +80,7 @@ button.trigger:focus-visible { outline: 2px solid var(--ring); outline-offset: -
 
 .text { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
 .title { color: var(--foreground); font-size: 15px; font-weight: 600; line-height: 1.4; }
-.actor { font-weight: 800; color: var(--ink-sage); margin-right: 0.3em; }
+.actor { font-weight: 600; color: var(--foreground); margin-right: 0.3em; }
 .meta { color: var(--muted-foreground); font-size: 13px; font-variant-numeric: tabular-nums; }
 
 .time {

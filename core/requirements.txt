@@ -8,3 +8,4 @@ anthropic>=0.40
 numpy>=1.26
 opencv-python>=4.9
 ultralytics>=8.3     # YOLO nano for the local hazard loop; downloads yolov8n.pt on first run
+lap>=0.5            # ByteTrack ids for hazard tracking (ultralytics would otherwise pip-install it at runtime)

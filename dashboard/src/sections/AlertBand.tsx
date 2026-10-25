@@ -24,23 +24,23 @@ export function AlertBand({ alerts, thumb, onResolve }: { alerts: AlertRow[]; th
           exit={{ height: 0, opacity: 0 }}
           transition={{ duration: 0.3, ease: EASE }}
         >
-          <Alert className="mb-4 grid-cols-1 gap-3 rounded-[24px] border-alert/30 bg-[color-mix(in_oklab,var(--alert)_8%,white)] p-6 shadow-[var(--shadow-soft)] text-foreground">
-            <div className="flex flex-wrap items-center gap-x-2 text-base font-bold text-alert">
+          <Alert className="mb-5 grid-cols-1 gap-3 rounded-2xl border-alert/25 bg-[color-mix(in_oklab,var(--alert)_6%,white)] p-5 text-foreground">
+            <div className="flex flex-wrap items-center gap-x-2 text-[15px] font-semibold text-alert">
               <BellRing className="size-4" aria-hidden />
               {LABEL[a.kind] ?? 'Alert'}
-              <span className="font-medium text-muted-foreground">· {ago(Number(a.ts), now)}</span>
+              <span className="font-normal text-muted-foreground">· {ago(Number(a.ts), now)}</span>
             </div>
             <p className="whitespace-pre-wrap text-lg leading-snug">{a.note}</p>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
               {thumb && (
                 <div className="flex items-center gap-3 text-[13px] text-muted-foreground">
-                  <Photo src={thumb} alt="" className="h-[60px] w-20 rounded-xl" />
+                  <Photo src={thumb} alt="" className="h-[60px] w-20 rounded-lg" />
                   Last view from the glasses
                 </div>
               )}
               <Button
                 onClick={() => onResolve(a.id)}
-                className="h-12 w-full rounded-full bg-alert px-7 text-base font-bold text-white hover:bg-alert/90 sm:ml-auto sm:w-auto"
+                className="h-11 w-full rounded-xl bg-alert px-6 text-[15px] font-semibold text-white hover:bg-alert/90 sm:ml-auto sm:w-auto"
               >
                 I'm on it
               </Button>

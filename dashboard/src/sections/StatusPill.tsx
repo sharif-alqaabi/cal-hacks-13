@@ -18,14 +18,11 @@ export function StatusPill({ active, lastTs }: { active: boolean; lastTs: number
   return (
     <span
       role="status"
-      className={cn(
-        'inline-flex h-9 items-center gap-2 rounded-full px-4 text-[13px] font-bold shadow-[var(--shadow-soft)]',
-        sharing ? 'bg-[var(--tint-sage)] text-[var(--ink-sage)]' : 'bg-card text-muted-foreground',
-      )}
+      className="inline-flex h-8 items-center gap-2 rounded-full border border-border bg-card px-3 text-[13px] font-medium"
     >
-      <span className={cn('size-2.5 rounded-full', sharing ? 'breathe bg-live' : 'bg-muted-foreground/60')} aria-hidden />
+      <span className={cn('size-2 rounded-full', sharing ? 'breathe bg-live' : 'bg-muted-foreground/50')} aria-hidden />
       {!active ? 'Connecting…' : sharing ? 'Sharing is on' : 'Sharing is off'}
-      {detail && <span className="hidden font-semibold opacity-75 sm:inline">· {detail}</span>}
+      {detail && <span className="hidden font-normal text-muted-foreground sm:inline">· {detail}</span>}
     </span>
   )
 }

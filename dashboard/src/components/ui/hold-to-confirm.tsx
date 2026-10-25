@@ -283,7 +283,7 @@ export function HoldToConfirm({
       aria-describedby={hintId}
       {...bind}
       style={{ touchAction: "manipulation", WebkitTouchCallout: "none" }}
-      className={`relative isolate inline-grid h-12 w-full select-none place-items-center overflow-hidden rounded-full border border-transparent bg-[var(--tint-lilac)] px-5 text-sm font-bold text-[var(--ink-lilac)] outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+      className={`relative isolate inline-grid h-11 w-full select-none place-items-center overflow-hidden rounded-xl border border-border bg-card px-5 text-sm font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring ${
         disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"
       } ${className}`}
     >
@@ -294,7 +294,7 @@ export function HoldToConfirm({
       <motion.span
         aria-hidden
         style={{ clipPath }}
-        className="absolute inset-0 grid place-items-center bg-[var(--ink-lilac)] px-5 text-white"
+        className="absolute inset-0 grid place-items-center bg-foreground px-5 text-background"
       >
         <Faces committed={committed} confirmLabel={confirmLabel}>
           {children}

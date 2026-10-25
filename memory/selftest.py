@@ -56,9 +56,9 @@ def check_strict(schema: dict, path: str) -> None:
 def test_schemas() -> None:
     check_strict(captions.CAPTION_SCHEMA, "caption")
     check_strict(captions.REMEMBER_SCHEMA, "remember")
-    check_strict(captions.LOOK_SCHEMA, "look")
+    check_strict(captions.ANSWER_SCHEMA, "answer")
     assert captions.CAPTION_SCHEMA["properties"]["place"]["enum"] == captions.PLACES
-    assert captions.REMEMBER_SCHEMA["properties"]["kind"]["enum"] == ["person", "fact"]
+    assert captions.REMEMBER_SCHEMA["properties"]["kind"]["enum"] == ["person", "fact", "earlier"]
 
 
 def test_docs() -> None:
@@ -140,6 +140,23 @@ def test_look() -> None:
     assert ids(service.look_frames([3], ms, recent=True)) == [2, 3, 4, 7, 8, 9, 10]  # "just": the newest frames too
     assert ids(service.look_frames([2, 9], ms, recent=False, n=3)) == [1, 2, 3]  # the cap keeps the best hit's frames
     assert service.look_frames([99], ms, recent=False) == []  # a hit on a forgotten moment
+
+
+def test_earlier() -> None:
+    def seen(id_, name, thumb):
+        m = moment(id_, {**CAP, "people": [{"name": name, "clothing": "olive jacket", "position": ""}]}, ts=id_ * MIN)
+        return {**m, "thumb_url": thumb}
+    stranger, sam = seen(1, "", "t1"), seen(2, "Sam", "t2")
+    assert service.last_unnamed([stranger, sam]) == (stranger, stranger_person := json.loads(stranger["caption_json"])["people"][0])
+    assert stranger_person["clothing"] == "olive jacket"
+    newer = seen(3, "", "t3")
+    assert service.last_unnamed([stranger, sam, newer])[0] is newer  # the newest unnamed person wins
+    assert service.last_unnamed([stranger, sam, newer], {1})[0] is stranger  # limited to the moments search matched
+    assert service.last_unnamed([stranger, sam, newer], {2}) is None  # a named person isn't a candidate
+    met = seen(4, "Kevin", "t1")  # naming stores a moment with the same picture, which claims the sighting
+    assert service.last_unnamed([stranger, sam, met]) is None
+    assert service.last_unnamed([stranger, sam, met, newer])[0] is newer
+    assert service.last_unnamed([]) is None
 
 
 def test_scenes() -> None:

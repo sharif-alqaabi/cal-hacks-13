@@ -65,6 +65,17 @@ with TestClient(app) as c:
         ok = (q["expect"].lower() in answer.lower()) if "expect" in q else bool(re.search(q["expect_regex"], answer))
         check(ok, f"{q['q']!r} ({ms:.0f} ms) -> {answer}")
 
+    # Naming someone from earlier: an unnamed man seen at the cafe, named later while the camera sees something else.
+    cafe = drive.render_scene("Busy small cafe. A man in a grey beanie and an olive green jacket stands at the counter ordering "
+                              "coffee. A menu board hangs above the counter.")
+    assert c.post("/ingest", json={"ts": now - 20 * 60, "jpeg_b64": cafe}).status_code == 202
+    settle(c)
+    elsewhere = drive.render_scene("Quiet street at dusk. A row of parked bicycles stands along a brick wall on the left.")
+    r = c.post("/remember", json={"label": "the guy I was talking to at the cafe was Kevin", "ts": now, "jpeg_b64": elsewhere})
+    check(r.json() == {"ok": True}, "/remember names a person seen earlier")
+    settle(c)
+    answer = c.post("/recall", json={"question": "what was Kevin wearing"}).json()["answer"]
+    check(re.search(r"olive|beanie", answer, re.I) is not None, f"'what was Kevin wearing' -> {answer}")
     check(c.post("/alert", json={"kind": "lost", "note": "I'm lost"}).json() == {"ok": True}, "/alert lost")
     check(c.post("/alert", json={"kind": "bogus"}).status_code == 422, "/alert rejects a bad kind")
     check(c.post("/ingest", json={"ts": now, "jpeg_b64": "not an image"}).status_code == 202, "/ingest tolerates junk")

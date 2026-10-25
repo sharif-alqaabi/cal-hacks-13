@@ -131,6 +131,24 @@ def look_frames(hit_ids: list[int], moments: list[dict], recent: bool, n: int = 
     return sorted(out, key=lambda m: m["ts"])
 
 
+def last_unnamed(moments: list[dict], ids: set[int] | None = None) -> tuple[dict, dict] | None:
+    """The newest (moment, person) where someone was seen without a name and nobody has named them yet, or None.
+    ids limits the search to those moments. Naming stores a moment that shares the picture's thumb_url, which is how
+    a sighting is known to be claimed (shortcut: a deleted original leaves that moment with a missing picture)."""
+    def people(m):
+        try:
+            return json.loads(m["caption_json"]).get("people") or []
+        except ValueError:
+            return []
+    claimed = {m["thumb_url"] for m in moments if m["thumb_url"] and any(known(p.get("name")) for p in people(m))}
+    for m in sorted(moments, key=lambda m: -m["ts"]):
+        if (ids is None or m["id"] in ids) and m["thumb_url"] not in claimed:
+            nameless = [p for p in people(m) if not known(p.get("name"))]
+            if nameless:
+                return m, nameless[0]
+    return None
+
+
 def to_second_person(statement: str) -> str:
     """'I put my wallet on the shelf' -> 'you put your wallet on the shelf' (the wearer hears it, so it's 'you')."""
     for first, second in ((r"\bI'm\b", "you're"), (r"\bI've\b", "you've"), (r"\bI'll\b", "you'll"), (r"\bI\b", "you"),
@@ -258,6 +276,8 @@ class Service:
         """label is what the wearer said. Introduces a person, or stores a fact like 'my passport is in the drawer'."""
         scene = scene_of(jpeg_b64)
         r = await captions.remember(label, None if scene is not None else jpeg_b64, scene)
+        if r["kind"] == "earlier":
+            return await self._name_earlier(label, known(r["person"]["name"]), known(r.get("who")))
         base = {"said": label, "place": r["place"], "place_detail": r["place_detail"]}
         mid = self._new_id(ts)
         if r["kind"] == "person":
@@ -282,6 +302,33 @@ class Service:
                            "thumb_url": self._thumb(mid, jpeg_b64), "place_note": r["place"]})
         return True
 
+    async def _name_earlier(self, label: str, name: str, who: str) -> bool:
+        """'The guy I talked to at the coffee shop was Kevin': name a person seen earlier, not the one in view now."""
+        if not name:
+            log.warning("remember: no name in %r", label)
+            return False
+        found = None
+        if who:
+            docs = (await self.index.search(who, top_k=20))[0]
+            people = [d for d in docs if (d.metadata or {}).get("kind") == "person"]
+            floor = max([d.score for d in people], default=0) - 0.08
+            found = last_unnamed(self.moments, {parse_ref(d.id)[0] for d in people if d.score >= max(MIN_SCORE, floor)})
+        found = found or last_unnamed(self.moments)  # no description, or nothing matched it: the latest unnamed person
+        if not found:
+            log.warning("remember: nobody unnamed to call %s", name)
+            return False
+        src, person = found
+        c = json.loads(src["caption_json"])
+        clothing = known(person.get("clothing"))
+        mid = self._new_id(src["ts"] / 1000)
+        cap = {"said": label, "place": c.get("place", "other"), "place_detail": c.get("place_detail", ""), "scene": "",
+               "objects": [], "text": [], "people": [{"name": name, "clothing": clothing, "position": ""}]}
+        await asyncio.gather(
+            self._set_person(name, clothing or "unknown", src["ts"]),
+            self._store({"id": mid, "ts": mid, "caption_json": json.dumps(cap), "thumb_url": src["thumb_url"],
+                         "place_note": src["place_note"]}))
+        return True
+
     # -- recall ---------------------------------------------------------------
 
     async def recall(self, question: str) -> dict:
@@ -296,57 +343,59 @@ class Service:
             strong = [(d, by_id[parse_ref(d.id)[0]]) for d in docs
                       if d.score >= MIN_SCORE and parse_ref(d.id)[0] in by_id]
             log.info("recall %r top hits: %s", question, [(d.id, round(d.score, 2)) for d in docs[:3]])  # for tuning MIN/FAST_SCORE
-            looked = None
-            # Not for questions with no strong hit: given only weak frames, the model offers a "closest" thing
-            # instead of saying it hasn't seen it (e2e: "where is my umbrella" -> "the closest is a raincoat").
-            if self.moments and (VISUAL.search(question) or JUST.search(question)):
-                looked = await self._look(question, [parse_ref(d.id)[0] for d in docs if d.score >= LOOK_SCORE], now_ms)
-            if looked:
-                answer, best = looked
-            elif not strong:
-                answer = NOT_SEEN
-            else:
+            # Visual and "just" questions also send the saved frames: a caption was written before anyone asked.
+            # Others with no strong hit stay "not seen" without a call (e2e: a never-seen umbrella got "the closest is a raincoat").
+            shots = self._frames(question, docs, now_ms) if VISUAL.search(question) or JUST.search(question) else []
+            answer, tpl = None, None
+            if strong:
                 top = max(d.score for d, _ in strong)
                 # Among the near-best hits (the same thing seen several times) trust the most recent.
                 doc, best = max((x for x in strong if x[0].score >= top - 0.08), key=lambda x: x[1]["ts"])
                 _, kind, idx = parse_ref(doc.id)
                 tpl = template(best, kind, idx, now_ms)
-                if tpl and doc.score >= FAST_SCORE:
+                if tpl and doc.score >= FAST_SCORE and not shots:
                     answer = tpl
-                else:
-                    entries = [self._entry(d, m, now_ms) for d, m in sorted(strong[:5], key=lambda x: -x[1]["ts"])]
-                    try:
-                        answer = await captions.answer(question, entries)
-                    except Exception as e:
-                        if not tpl:
-                            raise
-                        log.warning("answer failed, using the template: %r", e)
-                        answer = tpl
+            if answer is None:
+                entries = [self._entry(d, m, now_ms) for d, m in sorted(strong[:5], key=lambda x: -x[1]["ts"])]
+                try:
+                    answer, picked = await self._ask(question, entries, shots)
+                except Exception as e:
+                    if not tpl:
+                        raise
+                    log.warning("answer failed, using the template: %r", e)
+                    answer, picked = tpl, None
+                best = picked or best
         thumb = (best or {}).get("thumb_url") or None
         self._bg(self.db.call("add_recall", now_ms, question, answer, thumb or ""))
         return {"answer": answer, "ts": best["ts"] / 1000 if best else None, "thumb_url": thumb}
 
-    async def _look(self, question: str, hit_ids: list[int], now_ms: int) -> tuple[str, dict] | None:
-        """Answer from the saved frames themselves, or None (no frames, the call failed, or no frame shows it),
-        in which case the caller answers from the captions as before."""
+    def _frames(self, question: str, docs, now_ms: int) -> list[tuple[dict, tuple[str, str, str]]]:
+        """Saved frames to look at again: (moment, (when, jpeg_b64, what was noted)), oldest first."""
+        hit_ids = list(dict.fromkeys(parse_ref(d.id)[0] for d in docs if d.score >= LOOK_SCORE))
         shots = []
-        for m in look_frames(list(dict.fromkeys(hit_ids)), self.moments, bool(JUST.search(question))):
+        for m in look_frames(hit_ids, self.moments, bool(JUST.search(question))) if self.moments else []:
             path = THUMB_DIR / f"{m['id']}.jpg"
             if path.exists():  # forgotten from the dashboard: the picture is gone too
                 c = json.loads(m["caption_json"])
                 shots.append((m, (when_phrase(m["ts"], now_ms), base64.b64encode(path.read_bytes()).decode(),
                                   known(c.get("scene")) or known(c.get("said")))))
-        if not shots:
-            return None
-        try:
-            r = await asyncio.wait_for(captions.look(question, [s for _, s in shots]), LOOK_TIMEOUT_S)
-        except Exception as e:
-            log.warning("look-back failed, answering from captions: %r", e)
-            return None
-        log.info("look-back %r over %d frames -> frame %s", question, len(shots), r["frame"])
-        if not 0 <= r["frame"] < len(shots) or not r["answer"].strip():
-            return None
-        return r["answer"].strip(), shots[r["frame"]][0]
+        return shots
+
+    async def _ask(self, question: str, entries: list[str], shots) -> tuple[str, dict | None]:
+        """One call over the caption entries and the frames. Returns (answer, the moment of the frame it came from).
+        A slow or failed frames call is retried on the entries alone, so recall still fits core's 4 s."""
+        if shots:
+            try:
+                r = await asyncio.wait_for(captions.answer(question, entries, [f for _, f in shots]), LOOK_TIMEOUT_S)
+                log.info("answer %r over %d frames -> frame %s", question, len(shots), r["frame"])
+                text, shown = r["answer"].strip(), 0 <= r["frame"] < len(shots)
+                if text and (shown or entries):
+                    return text, shots[r["frame"]][0] if shown else None
+            except Exception as e:
+                log.warning("frames call failed, answering from captions: %r", e)
+        if not entries:
+            return NOT_SEEN, None
+        return (await captions.answer(question, entries))["answer"].strip(), None
 
     @staticmethod
     def _entry(doc, moment: dict, now_ms: int) -> str:

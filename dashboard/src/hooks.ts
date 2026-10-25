@@ -39,3 +39,27 @@ export function useMedia(query: string) {
   }, [query])
   return match
 }
+
+// Core streams the newest camera frame (~10 fps) on its mirror socket; the captioned moments only arrive every few seconds.
+const CORE_WS = (import.meta.env.VITE_CORE_WS as string | undefined) || `ws://${location.hostname}:8000/mirror/ws`
+
+/** The newest live camera frame from core as a data URL, or null when core isn't streaming. Reconnects on its own. */
+export function useLiveFrame() {
+  const [frame, setFrame] = useState<{ src: string; at: number } | null>(null)
+  useEffect(() => {
+    let ws: WebSocket | null = null
+    let retry: ReturnType<typeof setTimeout> | undefined
+    let live = true
+    const connect = () => {
+      ws = new WebSocket(CORE_WS)
+      ws.onmessage = e => {
+        const m = JSON.parse(e.data)
+        if (m.kind === 'frame') setFrame({ src: `data:image/jpeg;base64,${m.jpeg_b64}`, at: Date.now() })
+      }
+      ws.onclose = () => { if (live) retry = setTimeout(connect, 2000) }
+    }
+    connect()
+    return () => { live = false; clearTimeout(retry); ws?.close() }
+  }, [])
+  return frame
+}
