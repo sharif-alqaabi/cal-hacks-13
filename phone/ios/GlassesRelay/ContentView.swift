@@ -59,12 +59,9 @@ struct ContentView: View {
       .foregroundStyle(.white)
     }
     .padding()
-    .contentShape(Rectangle())
-    .gesture(
-      DragGesture(minimumDistance: 0)
-        .onChanged { _ in model.pttDown() }
-        .onEnded { _ in model.pttUp() }
-    )
+    // Raw UIKit touches: a SwiftUI drag gesture here was cut short (down then up within 2 ms)
+    // whenever the status bar above redrew.
+    .overlay(HoldArea(onDown: { model.pttDown() }, onUp: { model.pttUp() }))
     .accessibilityElement()
     .accessibilityLabel(model.talking ? "Listening" : "Hold to talk")
     .accessibilityHint("Touch and hold anywhere here while you speak, then let go.")
@@ -124,11 +121,15 @@ struct SettingsView: View {
           Picker("Source", selection: $model.sourceKind) {
             ForEach(SourceKind.allCases) { Text($0.label).tag($0) }
           }
+          Toggle("Glasses mic (falls back to phone mic)", isOn: $model.glassesMic)
         }
 
         Section("Glasses") {
           LabeledContent("Meta AI", value: registrationText)
           if model.registration == .registered {
+            // "The app on your glasses needs an update": both open the right page in Meta AI.
+            Button("Update app on glasses") { model.openGlassesAppUpdate() }
+            Button("Update glasses software") { model.openFirmwareUpdate() }
             Button("Disconnect glasses", role: .destructive) { model.disconnectGlasses() }
           } else {
             Button("Connect glasses") { model.connectGlasses() }
@@ -156,6 +157,43 @@ struct SettingsView: View {
     case .available: return "Not connected"
     case .unavailable: return "Unavailable"
     @unknown default: return "Unknown"
+    }
+  }
+}
+
+/// Touch down starts talking, the last finger lifting (or iOS cancelling the touch) stops it.
+private struct HoldArea: UIViewRepresentable {
+  let onDown: () -> Void
+  let onUp: () -> Void
+
+  func makeUIView(context: Context) -> TouchView {
+    let view = TouchView()
+    view.backgroundColor = .clear
+    view.isMultipleTouchEnabled = true
+    return view
+  }
+
+  func updateUIView(_ view: TouchView, context: Context) {
+    view.onDown = onDown
+    view.onUp = onUp
+  }
+
+  final class TouchView: UIView {
+    var onDown: (() -> Void)?
+    var onUp: (() -> Void)?
+    private var touching = 0
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+      if touching == 0 { onDown?() }
+      touching += touches.count
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) { lift(touches.count) }
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) { lift(touches.count) }
+
+    private func lift(_ count: Int) {
+      touching = max(0, touching - count)
+      if touching == 0 { onUp?() }
     }
   }
 }

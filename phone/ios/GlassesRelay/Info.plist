@@ -18,8 +18,6 @@
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
 	<string>1.0</string>
-	<key>CFBundleVersion</key>
-	<string>1</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -33,55 +31,58 @@
 			</array>
 		</dict>
 	</array>
-	<!-- Meta Wearables Device Access Toolkit -->
+	<key>CFBundleVersion</key>
+	<string>1</string>
 	<key>MWDAT</key>
 	<dict>
 		<key>AppLinkURLScheme</key>
 		<string>glassesrelay://</string>
-		<key>MetaAppID</key>
-		<string>$(META_APP_ID)</string>
 		<key>ClientToken</key>
 		<string>$(CLIENT_TOKEN)</string>
+		<key>MetaAppID</key>
+		<string>$(META_APP_ID)</string>
 		<key>TeamID</key>
 		<string>$(DEVELOPMENT_TEAM)</string>
+	</dict>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Connects to your Meta glasses.</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>Connects to your Meta glasses.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Uses the phone camera when the glasses camera is unavailable.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Connects to your glasses and to the assistant on your laptop.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Listens through your glasses while you hold the talk button.</string>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
 	</dict>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>bluetooth-central</string>
 		<string>bluetooth-peripheral</string>
 		<string>audio</string>
+		<string>processing</string>
+		<string>external-accessory</string>
 	</array>
-	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>Connects to your Meta glasses.</string>
-	<key>NSBluetoothPeripheralUsageDescription</key>
-	<string>Connects to your Meta glasses.</string>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>Connects to your glasses and to the assistant on your laptop.</string>
-	<key>NSBonjourServices</key>
-	<array>
-		<string>_bonjour._tcp</string>
-	</array>
-	<key>NSCameraUsageDescription</key>
-	<string>Uses the phone camera when the glasses camera is unavailable.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Listens through your glasses while you hold the talk button.</string>
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<key>NSAllowsLocalNetworking</key>
-		<true/>
-		<key>NSAllowsArbitraryLoads</key>
-		<true/>
-	</dict>
-	<key>UIApplicationSceneManifest</key>
-	<dict>
-		<key>UIApplicationSupportsMultipleScenes</key>
-		<false/>
-	</dict>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
 		<string>arm64</string>
+	</array>
+	<key>UISupportedExternalAccessoryProtocols</key>
+	<array>
+		<string>com.meta.ar.wearable</string>
 	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>

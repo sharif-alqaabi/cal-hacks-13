@@ -12,6 +12,14 @@ final class RelayModel {
   var coreURL: String {
     didSet { UserDefaults.standard.set(coreURL, forKey: "coreURL") }
   }
+  /// Glasses mic through the camera stream (experimental in Meta's SDK). Falls back to the phone
+  /// mic on its own when no glasses audio is arriving.
+  var glassesMic: Bool {
+    didSet {
+      UserDefaults.standard.set(glassesMic, forKey: "glassesMic")
+      if glassesMic != oldValue && sourceKind == .glasses { switchSource() }
+    }
+  }
   var sourceKind: SourceKind {
     didSet {
       UserDefaults.standard.set(sourceKind.rawValue, forKey: "sourceKind")
@@ -41,6 +49,7 @@ final class RelayModel {
   @ObservationIgnored private var source: FrameSource?
   @ObservationIgnored private var everConnected = false
   @ObservationIgnored private var framesThisSecond = 0
+  @ObservationIgnored private var chunksThisTurn = 0
   @ObservationIgnored private var ticker: Task<Void, Never>?
   @ObservationIgnored private var registrationTask: Task<Void, Never>?
   @ObservationIgnored private var started = false
@@ -49,6 +58,9 @@ final class RelayModel {
     let defaults = UserDefaults.standard
     coreURL = defaults.string(forKey: "coreURL") ?? "ws://192.168.1.10:8000/stream"
     sourceKind = defaults.string(forKey: "sourceKind").flatMap(SourceKind.init(rawValue:)) ?? .glasses
+    // Off by default: on glasses firmware 129 a stream with audio fails within seconds
+    // (meta-wearables-dat-ios #356). Turn it on in Settings to try newer firmware.
+    glassesMic = defaults.object(forKey: "glassesMic") as? Bool ?? false
     registration = Wearables.shared.registrationState
   }
 
@@ -60,14 +72,18 @@ final class RelayModel {
 
     link.onState = { [weak self] state in self?.linkChanged(state) }
     link.onMessage = { [weak self] msg in self?.handle(msg) }
-    encoder.onFrame = { [weak self] frame in
-      Task { @MainActor in self?.sendFrame(frame) }
+    encoder.onFrame = { [weak self] frame, json in
+      Task { @MainActor in self?.sendFrame(frame, json: json) }
     }
-    audio.onChunk = { [weak self] chunk in self?.link.send(chunk) }
+    audio.onChunk = { [weak self] chunk in
+      self?.chunksThisTurn += 1
+      self?.link.send(chunk)
+    }
 
     registrationTask = Task { [weak self] in
       for await state in Wearables.shared.registrationStateStream() {
         guard let self else { return }
+        relayLog("Meta AI registration: \(state)")
         let wasRegistered = self.registration == .registered
         self.registration = state
         if state == .registered && !wasRegistered && self.sourceKind == .glasses {
@@ -75,15 +91,26 @@ final class RelayModel {
         }
       }
     }
+    MainThreadWatch.shared.start()
     ticker = Task { [weak self] in
+      var seconds = 0
       while !Task.isCancelled {
         try? await Task.sleep(for: .seconds(1))
         guard let self else { return }
-        self.framesPerSecond = self.framesThisSecond
+        MainThreadWatch.shared.beat()
+        seconds += 1
+        if seconds % 5 == 0 {
+          relayLog("alive: \(self.framesThisSecond) fps, glasses audio buffers \(self.audio.glassesAudioBuffers()), link \(self.linkState)")
+        }
+        if (self.framesPerSecond == 0) != (self.framesThisSecond == 0) {
+          relayLog(self.framesThisSecond == 0 ? "frames stopped" : "frames flowing, \(self.framesThisSecond) fps")
+        }
+        if self.framesPerSecond != self.framesThisSecond { self.framesPerSecond = self.framesThisSecond }
         self.framesThisSecond = 0
       }
     }
 
+    audio.setGlassesAudio(sourceKind == .phoneCamera)
     Task { await audio.start() }
     connect()
     switchSource()
@@ -102,7 +129,31 @@ final class RelayModel {
 
   func connectGlasses() {
     Task {
-      do { try await GlassesAccount.register() } catch { errorMessage = "\(error)" }
+      relayLog("starting Meta AI registration")
+      do { try await GlassesAccount.register() } catch {
+        relayLog("registration failed: \(error)")
+        errorMessage = "\(error)"
+      }
+    }
+  }
+
+  func openGlassesAppUpdate() {
+    Task {
+      relayLog("opening Meta AI: glasses app update")
+      do { try await Wearables.shared.openDATGlassesAppUpdate() } catch {
+        relayLog("glasses app update failed: \(error)")
+        errorMessage = "\(error)"
+      }
+    }
+  }
+
+  func openFirmwareUpdate() {
+    Task {
+      relayLog("opening Meta AI: firmware update")
+      do { try await Wearables.shared.openFirmwareUpdate() } catch {
+        relayLog("firmware update failed: \(error)")
+        errorMessage = "\(error)"
+      }
     }
   }
 
@@ -123,7 +174,9 @@ final class RelayModel {
     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
     audio.stopPlayback()
     link.send(PttMsg(state: "down"))
+    chunksThisTurn = 0
     audio.beginCapture()
+    relayLog("talk down (\(audio.inputLabel))")
   }
 
   func pttUp() {
@@ -132,16 +185,23 @@ final class RelayModel {
     UIImpactFeedbackGenerator(style: .light).impactOccurred()
     audio.endCapture()  // flushes the last partial chunk before "up"
     link.send(PttMsg(state: "up"))
+    relayLog("talk up, \(chunksThisTurn) audio chunks sent")
   }
 
   // MARK: - Wiring
 
   private func switchSource() {
+    audio.setGlassesAudio(sourceKind == .phoneCamera)
     source?.stop()
     encoder.clear()
     let next: FrameSource
     switch sourceKind {
-    case .glasses: next = GlassesSource()
+    case .glasses:
+      let glasses = GlassesSource()
+      glasses.wantsAudio = glassesMic
+      let audio = self.audio
+      glasses.onAudio = { buffer in audio.ingestGlassesAudio(buffer) }
+      next = glasses
     #if DEBUG
     case .mockGlasses: next = GlassesSource(mock: true)
     #endif
@@ -155,12 +215,14 @@ final class RelayModel {
     next.start()
   }
 
-  private func sendFrame(_ frame: FrameMsg) {
+  private func sendFrame(_ frame: FrameMsg, json: String) {
     // Privacy: nothing leaves the phone while the glasses are paused or off.
     guard sourceState == .streaming || frame.snap_id != nil else { return }
-    link.send(frame, isFrame: frame.snap_id == nil)
+    link.sendText(json, isFrame: frame.snap_id == nil)
     framesThisSecond += 1
-    lastFrameSize = "\(frame.w)×\(frame.h)"
+    // Only write observed state when it changes: each write redraws the screen.
+    let size = "\(frame.w)×\(frame.h)"
+    if size != lastFrameSize { lastFrameSize = size }
   }
 
   private func handle(_ msg: InboundMsg) {
@@ -194,6 +256,7 @@ final class RelayModel {
   private func sourceChanged(_ state: SourceState) {
     let old = sourceState
     guard state != old else { return }
+    relayLog("source \(sourceKind): \(state)")
     sourceState = state
     switch state {
     case .paused:
@@ -206,8 +269,10 @@ final class RelayModel {
     case .waiting(let reason) where old == .streaming || old == .paused:
       encoder.clear()
       audio.cue(reason)
-    case .failed(let reason):
-      errorMessage = reason
+    case .failed:
+      // Shown in the status line and logged. An alert here would pop up on every retry and take
+      // the wearer's finger off the talk area.
+      break
     default:
       break
     }
@@ -222,5 +287,40 @@ final class RelayModel {
     guard var components = URLComponents(string: s), components.host != nil else { return nil }
     if components.path.isEmpty || components.path == "/" { components.path = "/stream" }
     return components.url
+  }
+}
+
+/// Logs from a background thread when the main thread stops answering, so a freeze shows up in
+/// relay.log even though nothing on the main thread can log it.
+final class MainThreadWatch: @unchecked Sendable {
+  static let shared = MainThreadWatch()
+  private let lock = NSLock()
+  private var last = Date()
+  private var reported = false
+  private var timer: DispatchSourceTimer?
+
+  func beat() {
+    lock.lock()
+    last = Date()
+    if reported { relayLog("main thread responding again") }
+    reported = false
+    lock.unlock()
+  }
+
+  func start() {
+    guard timer == nil else { return }
+    let t = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+    t.schedule(deadline: .now() + 2, repeating: 1)
+    t.setEventHandler { [weak self] in
+      guard let self else { return }
+      self.lock.lock()
+      let stalled = Date().timeIntervalSince(self.last)
+      let report = stalled > 3 && !self.reported
+      if report { self.reported = true }
+      self.lock.unlock()
+      if report { relayLog("main thread blocked for \(Int(stalled)) s") }
+    }
+    t.resume()
+    timer = t
   }
 }

@@ -1,12 +1,15 @@
 import AVFoundation
 import QuartzCore
+import UIKit
 
 /// Both audio directions on one AVAudioEngine.
 /// - In: the glasses mic over Bluetooth HFP (8 kHz; the phone mic at 16 kHz when no glasses
 ///   are connected), sent as 100 ms `audio` chunks only between `beginCapture` and `endCapture`.
 /// - Out: `say` replies and status cues, played in order; an urgent reply clears the queue and
 ///   cuts off whatever is playing. A `say` with no audio is read out with the on-device voice.
-/// With the glasses connected, the HFP route plays everything through their speakers.
+/// With the glasses camera streaming, the glasses mute app audio and their headset link fights the
+/// stream (meta-wearables-dat-ios #358, #342), so both directions use the phone's own mic and
+/// speaker. Otherwise (phone camera) the HFP route plays everything through the glasses.
 @MainActor
 final class AudioIO: NSObject {
   /// Called on the main actor with each 100 ms chunk while capturing.
@@ -14,10 +17,14 @@ final class AudioIO: NSObject {
   private(set) var inputLabel = "no mic"
   private(set) var lastUrgentLatencyMs: Int?
 
-  private let engine = AVAudioEngine()
-  private let player = AVAudioPlayerNode()
+  private var engine = AVAudioEngine()
+  private var player = AVAudioPlayerNode()
   private let synth = AVSpeechSynthesizer()
   private let capture = Capture()
+  /// The glasses mic from inside the camera stream; fed off the main thread.
+  nonisolated private let glassesCapture = Capture()
+  /// Which capture the current turn is reading.
+  private var turnUsesGlasses = false
   private let playFormat = AVAudioFormat(standardFormatWithSampleRate: 24000, channels: 1)!
 
   private enum Clip {
@@ -29,36 +36,118 @@ final class AudioIO: NSObject {
   private var token = 0
   private var currentUtterance: ObjectIdentifier?
   private var started = false
+  private var rebuildPending = false
+  /// Bluetooth HFP to the glasses (mic and speakers). Off while the glasses camera streams.
+  private var glassesAudio = false
+  /// The route and mode the engine was last built for. Rebuilding restarts the engine, which
+  /// fires route and configuration notifications of its own: without this check each rebuild
+  /// triggered the next, about twice a second.
+  private var builtFor = ""
+  private var configObserver: NSObjectProtocol?
 
   override init() {
     super.init()
     synth.delegate = self
-    capture.onChunk = { [weak self] data, rate in
+    let send: @Sendable (Data, Int) -> Void = { [weak self] data, rate in
       let msg = AudioMsg(ts: Clock.now, pcm16_b64: data.base64EncodedString(), rate: rate)
       Task { @MainActor in self?.onChunk?(msg) }
     }
+    capture.onChunk = send
+    glassesCapture.onChunk = send
   }
 
   func start() async {
     guard !started else { return }
     started = true
     let micAllowed = await AVAudioApplication.requestRecordPermission()
-    engine.attach(player)
-    engine.connect(player, to: engine.mainMixerNode, format: playFormat)
+    attachPlayer()
     rebuild(micAllowed: micAllowed)
     let center = NotificationCenter.default
     center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] _ in
       Task { @MainActor in self?.routeChanged() }
     }
-    center.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
-      Task { @MainActor in self?.rebuild(micAllowed: AVAudioApplication.shared.recordPermission == .granted) }
+    // The audio daemon restarted (it did under the glasses stream + HFP): every node is dead.
+    center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: .main) { [weak self] _ in
+      Task { @MainActor in self?.recreateEngine() }
     }
+    center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+      Task { @MainActor in
+        guard let self, self.rebuildPending else { return }
+        self.rebuildPending = false
+        self.routeChanged()
+      }
+    }
+  }
+
+  /// Glasses audio (HFP) on or off; off while the glasses camera is the source.
+  func setGlassesAudio(_ on: Bool) {
+    guard on != glassesAudio else { return }
+    glassesAudio = on
+    relayLog("audio: \(on ? "glasses" : "phone") mic and speaker")
+    if started { routeChanged() }
+  }
+
+  private func attachPlayer() {
+    engine.attach(player)
+    engine.connect(player, to: engine.mainMixerNode, format: playFormat)
+    if let configObserver { NotificationCenter.default.removeObserver(configObserver) }
+    configObserver = NotificationCenter.default.addObserver(
+      forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
+    ) { [weak self] _ in
+      Task { @MainActor in self?.routeChanged() }
+    }
+  }
+
+  private var routeKey: String {
+    let route = AVAudioSession.sharedInstance().currentRoute
+    let ports = (route.inputs + route.outputs).map(\.uid).joined(separator: ",")
+    return "\(glassesAudio)|\(ports)"
+  }
+
+  private func recreateEngine() {
+    relayLog("audio: media services reset, rebuilding the engine")
+    stopPlayback()
+    engine.inputNode.removeTap(onBus: 0)
+    engine.stop()
+    engine = AVAudioEngine()
+    player = AVAudioPlayerNode()
+    attachPlayer()
+    builtFor = ""
+    routeChanged()
   }
 
   // MARK: - Capture (push-to-talk)
 
-  func beginCapture() { capture.begin() }
-  func endCapture() { capture.end() }
+  /// In-stream glasses audio buffers received since the last call (any thread).
+  nonisolated func glassesAudioBuffers() -> Int { glassesCapture.takeSeen() }
+
+  /// In-stream audio from the glasses (any thread).
+  nonisolated func ingestGlassesAudio(_ buffer: AVAudioPCMBuffer) {
+    glassesCapture.ingestAny(buffer)
+  }
+
+  func beginCapture() {
+    // The glasses mic when its in-stream audio is arriving, otherwise the phone mic.
+    turnUsesGlasses = glassesCapture.fed(within: 1)
+    if turnUsesGlasses {
+      inputLabel = "glasses mic (in-stream) 16 kHz"
+      glassesCapture.begin()
+      return
+    }
+    if inputLabel.hasPrefix("glasses mic (in-stream)") { inputLabel = "phone mic 16 kHz" }
+    // The mic tap can go quiet after a route or configuration change without any error: if no
+    // buffers arrived since the last press, rebuild before listening.
+    let seen = capture.takeSeen()
+    if !engine.isRunning || seen == 0 {
+      relayLog("capture: engine running=\(engine.isRunning), \(seen) mic buffers since last check; rebuilding")
+      builtFor = ""
+      rebuild(micAllowed: AVAudioApplication.shared.recordPermission == .granted)
+    }
+    capture.begin()
+  }
+  func endCapture() {
+    if turnUsesGlasses { glassesCapture.end() } else { capture.end() }
+  }
 
   // MARK: - Playback
 
@@ -79,7 +168,7 @@ final class AudioIO: NSObject {
       queue = [clip]
       playNext()
       lastUrgentLatencyMs = Int((CACurrentMediaTime() - arrived) * 1000)
-      NSLog("[Relay] urgent say \(say.id ?? "?") started \(lastUrgentLatencyMs ?? -1) ms after arrival")
+      relayLog("urgent say \(say.id ?? "?") started \(lastUrgentLatencyMs ?? -1) ms after arrival")
     } else {
       queue.append(clip)
       if !playing { playNext() }
@@ -136,22 +225,46 @@ final class AudioIO: NSObject {
   // MARK: - Session and engine
 
   private func routeChanged() {
+    // While Meta AI is in front (registration, permission, glasses app update) the session can't be
+    // activated ("!int"), and each failed attempt fires another change: wait until we're back.
+    guard UIApplication.shared.applicationState == .active else {
+      rebuildPending = true
+      return
+    }
+    // Same route as last time: just make sure the engine is still running.
+    guard routeKey != builtFor else {
+      ensureRunning()
+      return
+    }
     // Glasses connected or disconnected: re-pick the input and rebuild the tap for its rate.
     rebuild(micAllowed: AVAudioApplication.shared.recordPermission == .granted)
   }
 
   private func rebuild(micAllowed: Bool) {
     let session = AVAudioSession.sharedInstance()
+    // Reconfiguring the session under a running engine leaves its I/O unit on the old format.
+    if engine.isRunning { engine.stop() }
     do {
-      try session.setCategory(.playAndRecord, mode: .default, options: [.allowBluetoothHFP, .defaultToSpeaker])
-      try session.setActive(true)
-      if let glasses = session.availableInputs?.first(where: { $0.portType == .bluetoothHFP }),
-        session.preferredInput?.uid != glasses.uid
-      {
-        try session.setPreferredInput(glasses)
+      if glassesAudio {
+        try session.setCategory(.playAndRecord, mode: .default, options: [.allowBluetoothHFP, .defaultToSpeaker])
+        try session.setActive(true)
+        if let glasses = session.availableInputs?.first(where: { $0.portType == .bluetoothHFP }),
+          session.preferredInput?.uid != glasses.uid
+        {
+          try session.setPreferredInput(glasses)
+        }
+      } else {
+        // No Bluetooth options: output stays on the phone speaker, input on the phone mic.
+        try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
+        try session.setActive(true)
+        if let phoneMic = session.availableInputs?.first(where: { $0.portType == .builtInMic }),
+          session.preferredInput?.uid != phoneMic.uid
+        {
+          try session.setPreferredInput(phoneMic)
+        }
       }
     } catch {
-      NSLog("[Relay] audio session: \(error)")
+      relayLog("audio session: \(error)")
     }
 
     let input = engine.inputNode
@@ -166,16 +279,29 @@ final class AudioIO: NSObject {
       }
       let onGlasses = session.currentRoute.inputs.contains { $0.portType == .bluetoothHFP }
       inputLabel = "\(onGlasses ? "glasses" : "phone") mic \(rate / 1000) kHz"
+      relayLog("audio: in=\(session.currentRoute.inputs.map(\.portName)) out=\(session.currentRoute.outputs.map(\.portName)) \(Int(format.sampleRate)) Hz")
     } else {
       inputLabel = micAllowed ? "no mic" : "mic not allowed"
+      relayLog("audio: \(inputLabel) (input format \(format.sampleRate) Hz, \(format.channelCount) ch)")
     }
     ensureRunning()
+    builtFor = routeKey
   }
 
   private func ensureRunning() {
     guard !engine.isRunning else { return }
     engine.prepare()
-    do { try engine.start() } catch { NSLog("[Relay] engine start: \(error)") }
+    do {
+      try engine.start()
+    } catch {
+      // -50 from kAUStartIO: the I/O unit still holds the format from before a route or category
+      // change (e.g. HFP coming up). Reset it, reactivate the session and try once more.
+      relayLog("engine start: \(error); resetting")
+      engine.reset()
+      try? AVAudioSession.sharedInstance().setActive(true)
+      engine.prepare()
+      do { try engine.start() } catch { relayLog("engine start after reset: \(error)") }
+    }
   }
 
   static func makeBuffer(pcm16 data: Data, rate: Double, to target: AVAudioFormat) -> AVAudioPCMBuffer? {
@@ -228,11 +354,44 @@ private final class Capture: @unchecked Sendable {
   private var rate = 16000
   private var active = false
   private var pending = Data()
+  private var seen = 0
+  private var inputFormat: AVAudioFormat?
+  private var lastFed: CFTimeInterval = 0
+
+  /// True when a buffer arrived within `seconds`.
+  func fed(within seconds: CFTimeInterval) -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return CACurrentMediaTime() - lastFed < seconds
+  }
+
+  /// For sources whose format isn't known up front (the glasses' in-stream audio): configures the
+  /// converter from the first buffer, and again if the format changes.
+  func ingestAny(_ buffer: AVAudioPCMBuffer) {
+    lock.lock()
+    let needsConfig = inputFormat.map { !$0.isEqual(buffer.format) } ?? true
+    lock.unlock()
+    if needsConfig {
+      relayLog("glasses audio: \(buffer.format.sampleRate) Hz, \(buffer.format.channelCount) ch, \(buffer.format.commonFormat.rawValue) fmt, interleaved \(buffer.format.isInterleaved), \(buffer.frameLength) frames")
+      configure(from: buffer.format, toRate: 16000)
+    }
+    ingest(buffer)
+  }
+
+  /// Tap buffers received (talking or not) since the last call.
+  func takeSeen() -> Int {
+    lock.lock()
+    defer { lock.unlock() }
+    let n = seen
+    seen = 0
+    return n
+  }
 
   func configure(from input: AVAudioFormat, toRate rate: Int) {
     lock.lock()
     defer { lock.unlock() }
     self.rate = rate
+    inputFormat = input
     outFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: Double(rate), channels: 1, interleaved: true)
     converter = outFormat.flatMap { AVAudioConverter(from: input, to: $0) }
   }
@@ -257,6 +416,8 @@ private final class Capture: @unchecked Sendable {
 
   func ingest(_ buffer: AVAudioPCMBuffer) {
     lock.lock()
+    seen += 1
+    lastFed = CACurrentMediaTime()
     guard active, let converter, let outFormat else {
       lock.unlock()
       return

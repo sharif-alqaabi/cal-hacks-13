@@ -6,10 +6,10 @@ DEVELOPMENT_TEAM =
 // Must be unique to your team, e.g. com.<yourname>.glassesrelay
 RELAY_BUNDLE_ID = com.calhacks13.glassesrelay
 
-// From the Wearables Developer Center app. Leave empty while Developer Mode is on in the
-// Meta AI app (Settings > Developer Mode), which is enough for the hackathon.
-META_APP_ID =
-CLIENT_TOKEN =
+// From the Wearables Developer Center app. Keep 0 (as in Meta's samples) while Developer Mode is on
+// in the Meta AI app (Settings > App Info), which is enough for the hackathon.
+META_APP_ID = 0
+CLIENT_TOKEN = 0
 
 // GlassesRelay.entitlements adds Hotspot Configuration + Wi-Fi info, which the toolkit uses to
 // stream video over the glasses' Wi-Fi. A free (personal) Apple team cannot sign those; switch

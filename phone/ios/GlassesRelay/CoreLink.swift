@@ -19,6 +19,10 @@ final class CoreLink {
   private var attempt = 0
   private var framesInFlight = 0
   private var lastPong = Date()
+  /// Round trip of the last heartbeat ping. Pings queue behind frames on the same socket, so a
+  /// long round trip means frames are piling up in the send buffer.
+  private var rtt: TimeInterval = 0
+  private static let congestedRTT: TimeInterval = 0.35
   private var heartbeat: Task<Void, Never>?
   private var retry: Task<Void, Never>?
 
@@ -26,7 +30,7 @@ final class CoreLink {
   private static let maxFramesInFlight = 2
 
   func connect(to url: URL) {
-    NSLog("[Relay] connecting to \(url.absoluteString)")
+    relayLog("connecting to \(url.absoluteString)")
     self.url = url
     attempt = 0
     open()
@@ -55,6 +59,21 @@ final class CoreLink {
     }
   }
 
+  /// Sends a message already encoded as JSON text (frames, encoded off the main thread).
+  func sendText(_ text: String, isFrame: Bool) {
+    guard state == .connected, let task else { return }
+    if isFrame && (framesInFlight >= Self.maxFramesInFlight || rtt > Self.congestedRTT) { return }
+    if isFrame { framesInFlight += 1 }
+    let gen = generation
+    task.send(.string(text)) { [weak self] error in
+      Task { @MainActor in
+        guard let self, gen == self.generation else { return }
+        if isFrame { self.framesInFlight -= 1 }
+        if let error { self.fail(gen, "send: \(error.localizedDescription)") }
+      }
+    }
+  }
+
   var isConnected: Bool { state == .connected }
 
   // MARK: - Private
@@ -62,6 +81,7 @@ final class CoreLink {
   private func open() {
     guard let url else { return }
     teardown()
+    rtt = 0
     let gen = generation
     let t = session.webSocketTask(with: url)
     t.maximumMessageSize = 16 << 20
@@ -123,10 +143,20 @@ final class CoreLink {
         try? await Task.sleep(for: .seconds(1))
         guard let self, gen == self.generation, !Task.isCancelled else { return }
         if Date().timeIntervalSince(self.lastPong) > 3 { self.fail(gen, "no pong for 3 s"); return }
+        let sent = Date()
         t.sendPing { [weak self] error in
           Task { @MainActor in
             guard let self, gen == self.generation else { return }
-            if let error { self.fail(gen, "ping: \(error.localizedDescription)") } else { self.lastPong = Date() }
+            if let error {
+              self.fail(gen, "ping: \(error.localizedDescription)")
+            } else {
+              self.lastPong = Date()
+              let wasCongested = self.rtt > Self.congestedRTT
+              self.rtt = self.lastPong.timeIntervalSince(sent)
+              if (self.rtt > Self.congestedRTT) != wasCongested {
+                relayLog(wasCongested ? "link clear (\(Int(self.rtt * 1000)) ms), sending frames" : "link backed up (\(Int(self.rtt * 1000)) ms), dropping frames")
+              }
+            }
           }
         }
       }
@@ -135,7 +165,7 @@ final class CoreLink {
 
   private func fail(_ gen: Int, _ reason: String) {
     guard gen == generation, url != nil else { return }
-    NSLog("[Relay] link dropped (\(reason)); retry \(attempt + 1)")
+    relayLog("link dropped (\(reason)); retry \(attempt + 1)")
     teardown()
     set(.reconnecting)
     let delay = Self.backoff[min(attempt, Self.backoff.count - 1)]

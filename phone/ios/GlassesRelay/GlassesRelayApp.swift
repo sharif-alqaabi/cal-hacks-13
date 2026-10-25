@@ -10,7 +10,7 @@ struct GlassesRelayApp: App {
     do {
       try Wearables.configure()
     } catch {
-      NSLog("[Relay] Wearables.configure failed: \(error)")
+      relayLog("Wearables.configure failed: \(error)")
     }
     _model = State(wrappedValue: RelayModel())
   }
@@ -21,7 +21,10 @@ struct GlassesRelayApp: App {
         .preferredColorScheme(.dark)
         // Callback from the Meta AI app after registration or a permission request.
         .onOpenURL { url in
-          Task { _ = try? await Wearables.shared.handleUrl(url) }
+          relayLog("opened by URL \(url.absoluteString)")
+          Task {
+            do { _ = try await Wearables.shared.handleUrl(url) } catch { relayLog("handleUrl failed: \(error)") }
+          }
         }
     }
   }

@@ -5,14 +5,15 @@ import UIKit
 /// JPEG quality 0.7. Keeps only the latest full-resolution image (in memory, never on disk)
 /// so a `snap` can be answered with a sharper frame. Safe to call from any thread.
 final class FrameEncoder: @unchecked Sendable {
-  var fps: Double = 5
-  /// Called on the encoder's queue.
-  var onFrame: (@Sendable (FrameMsg) -> Void)?
+  var fps: Double = 15
+  /// Called on the encoder's queue with the frame and its ready-to-send JSON, so the main
+  /// thread never base64s or JSON-encodes a frame.
+  var onFrame: (@Sendable (FrameMsg, String) -> Void)?
 
   private let queue = DispatchQueue(label: "relay.frame-encoder", qos: .userInitiated)
   private let lock = NSLock()
   private var latest: UIImage?
-  private var lastSent: CFTimeInterval = 0
+  private var nextDue: CFTimeInterval = 0
   private var busy = false
 
   static let streamLongSide: CGFloat = 640
@@ -22,10 +23,11 @@ final class FrameEncoder: @unchecked Sendable {
     lock.lock()
     latest = image
     let now = CACurrentMediaTime()
-    let due = !busy && now - lastSent >= 1 / fps
+    // Slots every 1/fps: a jittery camera still gets every slot, but never more than fps.
+    let due = !busy && now >= nextDue
     if due {
       busy = true
-      lastSent = now
+      nextDue = max(nextDue + 1 / fps, now + 0.5 / fps)
     }
     lock.unlock()
     guard due else { return }
@@ -35,7 +37,7 @@ final class FrameEncoder: @unchecked Sendable {
       self.lock.lock()
       self.busy = false
       self.lock.unlock()
-      if let frame { self.onFrame?(frame) }
+      if let frame { self.deliver(frame) }
     }
   }
 
@@ -46,8 +48,13 @@ final class FrameEncoder: @unchecked Sendable {
     lock.unlock()
     guard let image else { return }
     queue.async { [weak self] in
-      if let frame = Self.encode(image, longSide: Self.snapLongSide, snapID: id) { self?.onFrame?(frame) }
+      if let frame = Self.encode(image, longSide: Self.snapLongSide, snapID: id) { self?.deliver(frame) }
     }
+  }
+
+  private func deliver(_ frame: FrameMsg) {
+    guard let data = try? JSONEncoder().encode(frame), let json = String(data: data, encoding: .utf8) else { return }
+    onFrame?(frame, json)
   }
 
   /// Forgets the held image, e.g. when the glasses pause.
@@ -66,7 +73,10 @@ final class FrameEncoder: @unchecked Sendable {
     format.scale = 1
     format.opaque = true
     // Drawing also applies the image orientation, so the JPEG is always upright.
-    let jpeg = UIGraphicsImageRenderer(size: size, format: format).jpegData(withCompressionQuality: 0.7) { _ in
+    // Stream frames at 0.5 keep the upload small enough for wifi shared with the glasses' Bluetooth;
+    // snaps (what the vision model reads) stay at 0.7.
+    let quality: CGFloat = snapID == nil ? 0.5 : 0.7
+    let jpeg = UIGraphicsImageRenderer(size: size, format: format).jpegData(withCompressionQuality: quality) { _ in
       image.draw(in: CGRect(origin: .zero, size: size))
     }
     return FrameMsg(ts: Clock.now, jpeg_b64: jpeg.base64EncodedString(), w: Int(size.width), h: Int(size.height), snap_id: snapID)
