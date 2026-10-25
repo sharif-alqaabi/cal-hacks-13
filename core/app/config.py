@@ -48,6 +48,7 @@ HAZARDS_ENABLED = _bool("HAZARDS_ENABLED", True)
 YOLO_MODEL = os.getenv("YOLO_MODEL", "yolov8n.pt")
 HAZARD_FPS = float(os.getenv("HAZARD_FPS", "15"))   # YOLO+ByteTrack ~10 ms/frame on the Mac
 HAZARD_COOLDOWN_S = float(os.getenv("HAZARD_COOLDOWN_S", "10"))   # no repeat warning about the same class within this
+HAZARD_PTT_MUTE_S = float(os.getenv("HAZARD_PTT_MUTE_S", "10"))   # no hazard warnings from PTT down until the answer is spoken and this long after PTT up
 DEMO_MODE = _bool("DEMO_MODE", False)   # stricter hazard gating for a busy table
 HAZARD_IMGSZ = int(os.getenv("HAZARD_IMGSZ", "320"))
 

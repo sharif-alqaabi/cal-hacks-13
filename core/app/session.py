@@ -101,6 +101,8 @@ class Session:
         self.pending_task_id: str | None = None
         self.snaps: dict[str, asyncio.Future] = {}
         self.hazard_busy = False
+        self.hazard_mute_until = 0.0   # time.time() before which hazards stay quiet (PTT window)
+        self.ptt_turn: asyncio.Task | None = None   # the answer to the last PTT question
         self.tasks: set[asyncio.Task] = set()
         self.turn_task: asyncio.Task | None = None
         # push-to-talk state
@@ -214,6 +216,7 @@ class Session:
         if self.stt_task and not self.stt_task.done():
             self.stt_task.cancel()
         self.ptt_open = True
+        self.hazard_mute_until = time.time() + config.HAZARD_PTT_MUTE_S
         self.audio_q = None
         self.stt_task = None
 
@@ -247,10 +250,12 @@ class Session:
         if not self.ptt_open:
             return
         self.ptt_open = False
+        self.hazard_mute_until = time.time() + config.HAZARD_PTT_MUTE_S
         if self.audio_q is None:
             return   # no audio arrived: an accidental tap
         self.audio_q.put_nowait(None)
         self.start_turn(self.finish_turn(self.stt_task, Turn()))
+        self.ptt_turn = self.turn_task
 
     async def finish_turn(self, stt_task: asyncio.Task, turn: Turn) -> None:
         try:
@@ -272,6 +277,12 @@ class Session:
 
     # ---- frames, hazards, ingest --------------------------------------------
 
+    def hazards_muted(self) -> bool:
+        """Quiet while PTT is held, while its answer is in flight, and HAZARD_PTT_MUTE_S after PTT up."""
+        if self.ptt_open or time.time() < self.hazard_mute_until:
+            return True
+        return self.ptt_turn is not None and not self.ptt_turn.done()
+
     def on_frame(self, f: FrameMsg) -> None:
         if f.snap_id:
             fut = self.snaps.pop(f.snap_id, None)
@@ -280,7 +291,7 @@ class Session:
             self.latest = f
             return   # snap frames are large duplicates: no hazard check, no ingest
         self.latest = f
-        if detector.due() and not self.hazard_busy:
+        if detector.due() and not self.hazard_busy and not self.hazards_muted():
             self.hazard_busy = True
             self.spawn(self.check_hazard(f))
         self.maybe_ingest(f)
@@ -315,7 +326,7 @@ class Session:
     async def check_hazard(self, f: FrameMsg) -> None:
         try:
             warning = await asyncio.to_thread(detector.check, f.jpeg_b64)
-            if warning:
+            if warning and not self.hazards_muted():
                 lag_ms = int((time.time() - f.ts) * 1000)
                 b = detector.tracker.last_box
                 box = [b.x1, b.y1, b.x2, b.y2] if b else None

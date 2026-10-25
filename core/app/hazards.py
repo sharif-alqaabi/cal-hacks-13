@@ -74,7 +74,7 @@ def iou(a: Box, b: Box) -> float:
 
 
 def phrase(name: str, direction: str) -> str:
-    return f"Stop, {name} {direction}."
+    return f"{name[:1].upper()}{name[1:]} {direction}."
 
 
 def all_phrases() -> list[str]:

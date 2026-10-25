@@ -157,7 +157,7 @@ def test_hazard_frames_give_urgent_say(client):
             ws.send_text(frame(p))
             time.sleep(0.2)
         [s] = says(ws, 1)
-        assert s["urgent"] and s["text"] == "Stop, chair ahead, slightly left."
+        assert s["urgent"] and s["text"] == "Chair ahead, slightly left."
 
 
 @needs_fixtures

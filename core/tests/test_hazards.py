@@ -20,7 +20,7 @@ def grow(n=12, start=0.05, ratio=1.1):
 def test_growing_centred_box_warns_once():
     out = run(HazardTracker(demo_mode=False, cooldown_s=3), grow())
     warnings = [w for w in out if w]
-    assert warnings == ["Stop, chair ahead."]
+    assert warnings == ["Chair ahead."]
 
 
 def test_static_box_does_not_warn():
@@ -44,7 +44,7 @@ def test_cooldown_then_warns_again():
 
 def test_very_close_override():
     t = HazardTracker(demo_mode=False)
-    assert t.decide([chair(area=0.4)], 100.0) == "Stop, chair ahead."
+    assert t.decide([chair(area=0.4)], 100.0) == "Chair ahead."
 
 
 def test_demo_mode_ignores_person_and_raises_min_area():
@@ -63,8 +63,8 @@ def test_direction_table():
 
 
 def test_phrase_wording():
-    assert phrase("chair", direction_for(0.42)) == "Stop, chair ahead, slightly left."
-    assert "Stop, table on your right." in all_phrases()
+    assert phrase("chair", direction_for(0.42)) == "Chair ahead, slightly left."
+    assert "Table on your right." in all_phrases()
     assert len(all_phrases()) == len(set(all_phrases()))
 
 
