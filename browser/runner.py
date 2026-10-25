@@ -290,6 +290,10 @@ def youtube_run(task_id: str, plan: youtube.YouTubePlan) -> str:
         return _yt_play(task_id, agent, results[plan.pick - 1])
 
     store.close_current()
+    if plan.action == "open":
+        agent = _start(task_id, "https://www.youtube.com/", "Open YouTube. Never subscribe, like, comment or buy.", "YouTube")
+        _yt.update(agent=agent, results=[])
+        return "YouTube is open. What should I search for? Say, for example, find videos about cooking."
     query = plan.query
     agent = _start(task_id, youtube.search_url(query), youtube.goal(plan), "YouTube")
     _yt.update(agent=agent, results=[])

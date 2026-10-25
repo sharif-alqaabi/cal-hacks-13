@@ -21,6 +21,12 @@ def test_parse_actions():
     assert p("pause the video.") == YouTubePlan("pause")
     assert p("resume") == YouTubePlan("resume")
     assert p("keep playing") == YouTubePlan("resume")
+    assert p("open youtube and search for iphone 16 reviews") == YouTubePlan("search", "iphone 16 reviews")
+    assert p("Open YouTube and search for videos.") == YouTubePlan("open")
+    assert p("open youtube") == YouTubePlan("open")
+    assert p("go to YouTube and play lofi") == YouTubePlan("play", "lofi")
+    assert p("search for iphone 16 reviews on YouTube") == YouTubePlan("search", "iphone 16 reviews")
+    assert p("look up how to tie a tie on YouTube") == YouTubePlan("search", "how to tie a tie")
 
 
 def test_email_and_lookup_unchanged():

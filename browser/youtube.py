@@ -37,6 +37,9 @@ SEARCH_RX = re.compile(LEAD + r"(?:find|search(?: youtube)?(?: for)?|look up|loo
                        r"(?P<q>.+?)" + TAIL, re.I)
 SEARCH_YT_RX = re.compile(LEAD + r"(?:search|look up|find|look for)\s+(?:on\s+)?youtube\s+(?:for\s+)?(?P<q>.+?)[.!?]*$", re.I)
 PLAY_RX = re.compile(LEAD + r"(?:play|put on|watch)\s+(?:me\s+)?(?:a video (?:about|of|on)\s+)?(?P<q>.+?)" + TAIL, re.I)
+OPEN_RX = re.compile(LEAD + r"(?:open|go to|launch|pull up|bring up)\s+(?:up\s+)?youtube(?:\s+and)?\s*", re.I)
+GENERIC_SEARCH_RX = re.compile(r"^(?:search|find|look up|look for|show me|get me|pull up)\s+(?:up\s+)?(?:for\s+)?(?:some\s+|a\s+)?"
+                               r"(?:(?:youtube\s+)?(?:videos?|clips?)\s+(?:about|on|of|for|with)\s+)?(?P<q>.+?)" + TAIL, re.I)
 UNSAFE_RX = re.compile(r"\b(subscribe|unsubscribe|comment|like (?:it|this|the video|that)|dislike|upload|post|"
                        r"super ?chat|membership|join (?:the |this )?channel)\b", re.I)
 MENTIONS_RX = re.compile(r"\b(youtube|video|videos)\b", re.I)
@@ -46,7 +49,7 @@ REFUSE = "On YouTube I can find, read out, play and pause videos. I can't subscr
 
 @dataclass
 class YouTubePlan:
-    action: str          # search | play | latest | pick | pause | resume
+    action: str          # search | play | latest | pick | pause | resume | open
     query: str = ""
     pick: int = 0
 
@@ -76,6 +79,15 @@ def parse(goal: str) -> YouTubePlan | str | None:
         return YouTubePlan("search", query=m.group("q").strip())
     if m := PLAY_RX.match(text):
         return YouTubePlan("play", query=m.group("q").strip())
+    if MENTIONS_RX.search(text):   # "open YouTube and search for iPhone 16 reviews", "search for X on YouTube"
+        rest = OPEN_RX.sub("", text, count=1)
+        if not rest.strip(" .!?"):
+            return YouTubePlan("open")
+        if rest != text and (m := PLAY_RX.match(rest)):
+            return YouTubePlan("play", query=m.group("q").strip())
+        if m := GENERIC_SEARCH_RX.match(rest):
+            q = m.group("q").strip()
+            return YouTubePlan("open") if q.lower() in {"videos", "a video", "something", "youtube"} else YouTubePlan("search", query=q)
     return None
 
 
