@@ -1,6 +1,7 @@
 """In-process end to end: TestClient opens /stream like the phone; every API faked, stubs in-process."""
 import base64
 import json
+import threading
 import time
 import wave
 from pathlib import Path
@@ -157,7 +158,32 @@ def test_hazard_frames_give_urgent_say(client):
             ws.send_text(frame(p))
             time.sleep(0.2)
         [s] = says(ws, 1)
-        assert s["urgent"] and s["text"] == "Chair ahead, slightly left."
+        assert s["urgent"] and s["text"] == "Chair coming up ahead, slightly left."
+
+
+@needs_fixtures
+def test_hazard_muted_while_ptt_held(client):
+    urgent: list[dict] = []
+
+    def reader(ws) -> None:
+        try:
+            while True:
+                m = ws.receive_json()
+                if m.get("type") == "say" and m.get("urgent"):
+                    urgent.append(m)
+        except Exception:
+            pass
+
+    with client.websocket_connect("/stream") as ws:
+        t = threading.Thread(target=reader, args=(ws,), daemon=True)
+        t.start()
+        ws.send_text(json.dumps({"type": "ptt", "state": "down"}))
+        for p in sorted((FIX / "chair_walk").glob("*.jpg")):
+            ws.send_text(frame(p))
+            time.sleep(0.2)
+        ws.send_text(json.dumps({"type": "ptt", "state": "up"}))
+        time.sleep(0.6)
+    assert not urgent, urgent
 
 
 @needs_fixtures

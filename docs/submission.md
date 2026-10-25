@@ -41,7 +41,7 @@ submission may enter; if limited, drop in reverse order. General prizes are auto
 camera can now help with: reading a crossing signal, checking a packed order, sending an email, finding their keys.
 
 **What it does**: one voice loop through the glasses.
-- Obstacle warnings while walking ("Stop, chair ahead, slightly left.") from a detector running on the laptop.
+- Obstacle warnings while walking ("Chair coming up ahead, slightly left.") from a detector running on the laptop.
 - "What does the signal say?" describes the signal and moving cars, and never says "safe".
 - "Where did I put my keys?" answers with time and place from a memory of what the glasses saw; the thumbnail shows on
   the family dashboard.
@@ -70,7 +70,7 @@ Shot list, recorded Saturday night from each owner's checkpoint clips plus one f
 
 1. 0:00 The keys-recall moment (Devpost checklist: open with it). Keys set down on camera, later "Where did I put my
    keys?", spoken answer, thumbnail appears on the dashboard.
-2. Walking toward a chair: "Stop, chair ahead, slightly left."
+2. Walking toward a chair: "Chair coming up ahead, slightly left."
 3. Crosswalk footage: "The walk sign is on. A car is moving from your left."
 4. Email: screen split between Chrome and `http://localhost:8002/trace`. Show the guard line ("Held before Send"), the
    read-back, then "Send", and the verify line "Found it in the Sent folder". Then repeat with "cancel".

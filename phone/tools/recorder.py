@@ -125,7 +125,7 @@ class Recorder:
                 await self.snap()
             if a.urgent_every and now - last_urgent >= a.urgent_every:
                 last_urgent = now
-                await self.say("Stop, chair ahead, slightly left.", urgent=True)
+                await self.say("Chair coming up ahead, slightly left.", urgent=True)
 
     async def keys(self) -> None:
         loop = asyncio.get_running_loop()
@@ -135,7 +135,7 @@ class Recorder:
                 return
             cmd = line.strip().lower()
             if cmd == "u":
-                await self.say("Stop, chair ahead, slightly left.", urgent=True)
+                await self.say("Chair coming up ahead, slightly left.", urgent=True)
             elif cmd == "s":
                 await self.snap()
 

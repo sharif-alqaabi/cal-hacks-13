@@ -108,7 +108,7 @@ Meta's own SDK log is at `Library/Caches/MetaWearablesDAT/Logs/MetaWearablesDAT.
 `GlassesRelay/CoreLink.swift` and `Messages.swift` are Foundation-only. They were exercised on a Mac
 against `python -m tests.run_offline --with-stubs` (core with faked APIs) using the core fixtures:
 
-- **Chair walk:** urgent "Stop, chair ahead" twice, 3 s apart.
+- **Chair walk:** urgent "Chair coming up ahead" twice, 3 s apart.
 - **Keys:** `keys.wav` over push-to-talk answered 71 ms after `ptt up`.
 - **Describe:** `snap` answered, then a two-sentence reply.
 - **Reconnect:** core was killed and restarted mid-stream, and the link came back on its own.

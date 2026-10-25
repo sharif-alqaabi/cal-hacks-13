@@ -189,9 +189,9 @@ def frames_for(name: str, ctx: Ctx) -> list[bytes]:
 async def beat_hazard(ctx: Ctx):
     if ctx.mode == "live":
         src = first_existing(REAL / "chair_walk.mp4", FIX / "zoom_walk")
-        pat = r"^Chair" if src and src.suffix == ".mp4" else r"."
+        pat = r"^Chair (coming up|close by)" if src and src.suffix == ".mp4" else r"(coming up|close by)"
     else:
-        src, pat = FIX / "chair_walk", r"^Chair"
+        src, pat = FIX / "chair_walk", r"^Chair (coming up|close by)"
     if src is None:
         return "SKIP", None, None, "no hazard frames"
     t0 = time.time()
@@ -339,7 +339,7 @@ async def beat_bicycle(ctx: Ctx):
     if not src.exists():
         return "SKIP", None, None, "no bicycle_walk.mp4"
     t0, urgent = await play_clip(ctx, src)
-    pat = r"^(Bicycle|Bike)"
+    pat = r"^Bike (coming up|close by)"
     hits = [m["text"] for _, m in urgent if re.match(pat, m["text"])]
     hz = [e for e in mirror_events(ctx, "hazard", t0) if re.match(pat, e["text"])]
     lag = hz[0]["lag_ms"] if hz else None

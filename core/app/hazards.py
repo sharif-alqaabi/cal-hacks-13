@@ -73,12 +73,16 @@ def iou(a: Box, b: Box) -> float:
     return inter / (a.area + b.area - inter) if inter else 0.0
 
 
-def phrase(name: str, direction: str) -> str:
-    return f"{name[:1].upper()}{name[1:]} {direction}."
+def phrase(name: str, direction: str, approaching: bool = True) -> str:
+    label = name.capitalize()
+    if approaching:
+        return f"{label} coming up {direction}."
+    return f"{label} close by, {direction}."
 
 
 def all_phrases() -> list[str]:
-    return [phrase(n, d) for n in sorted(set(HAZARD_CLASSES.values())) for d in DIRECTIONS]
+    names = sorted(set(HAZARD_CLASSES.values()))
+    return [phrase(n, d, app) for n in names for d in DIRECTIONS for app in (True, False)]
 
 
 def direction_for(cx: float) -> str:
@@ -175,7 +179,11 @@ class HazardTracker:
         self.last_warned[best.key] = (now, best.area)
         self.class_warned[best.cls] = now
         self.last_box = best
-        return phrase(HAZARD_CLASSES[best.cls], direction_for(best.cx))
+        past = self._past_area(best.key, now)
+        growing = past is not None and past > 0 and best.area >= past * GROWTH
+        fast = past is not None and past > 0 and best.area >= past * FAST_GROWTH
+        approaching = growing or fast
+        return phrase(HAZARD_CLASSES[best.cls], direction_for(best.cx), approaching)
 
 
 @dataclass

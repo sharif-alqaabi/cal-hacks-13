@@ -278,10 +278,10 @@ class Session:
     # ---- frames, hazards, ingest --------------------------------------------
 
     def hazards_muted(self) -> bool:
-        """Quiet while PTT is held, while its answer is in flight, and HAZARD_PTT_MUTE_S after PTT up."""
+        """Quiet while PTT is held, while any turn's answer is in flight, and HAZARD_PTT_MUTE_S after PTT up."""
         if self.ptt_open or time.time() < self.hazard_mute_until:
             return True
-        return self.ptt_turn is not None and not self.ptt_turn.done()
+        return any(t is not None and not t.done() for t in (self.ptt_turn, self.turn_task))
 
     def on_frame(self, f: FrameMsg) -> None:
         if f.snap_id:

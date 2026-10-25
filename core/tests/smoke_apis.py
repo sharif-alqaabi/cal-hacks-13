@@ -61,7 +61,7 @@ async def check_stt() -> bool:
 async def check_tts() -> bool:
     if not tts.available():
         return report("tts", "SKIP", "no CARTESIA_API_KEY / CARTESIA_VOICE_ID")
-    text = f"Chair ahead, slightly left. {time.time():.0f}"   # bypass the cache
+    text = f"Chair coming up ahead, slightly left. {time.time():.0f}"   # bypass the cache
     t0 = time.perf_counter()
     try:
         pcm = await tts._fetch(text)
