@@ -56,6 +56,8 @@ WEB_RX = re.compile(
     r"(?:(?:number )?(?:one|two|three|1|2|3|first|second|third|top|last) (?:one|result|search result|link|website|web ?site|site|page|article|option)"
     r"|(?:result|link|website|option) (?:number )?(?:one|two|three|1|2|3|first|second|third|top|last))(?: please)?$"
     r"|(?:click|tap)(?: on)? (?:the )?(?:number )?(?:one|two|three|1|2|3|first|second|third|top|last)(?: one)?$"
+    r"|(?:go |navigate )?(?:back|forward)(?: (?:a|one) page| to the previous page)?(?: please)?$"
+    r"|(?:press|hit|click|tap)(?: on)? (?:the )?(?:back|forward)(?: arrow| button)?(?: please)?$|previous page$"
     r"|(?:what about |how about |and |now |then )?(?:the )?(?:number (?:one|two|three|1|2|3)|(?:first|second|third|last)(?: one)?|"
     r"(?:first|second|third|last|top) (?:result|link|website|site|video))(?: please)?$)")
 

@@ -72,14 +72,32 @@ CLOSE_TAB_RX = re.compile(LEAD + r"close\s+(?:this|the|that|my|the current)?\s*(
                           r"(?:\s+(?:for me|please|in chrome))*[.!?]*$", re.I)
 NEW_TAB_URL = "https://www.google.com/"
 
+# The browser's back and forward arrows. Only browser wording counts, so "go back to the car" is not a page.
+BACK_RX = re.compile(LEAD + r"(?:(?:go|navigate|take me|head) back|back|press back|hit back|click back|"
+                     r"(?:press|hit|click|tap)(?: on)? the back(?: arrow| button)?|go to the previous page|previous page|"
+                     r"back(?: arrow| button))(?: (?:a|one) page| to the (?:last|previous) page| page)?"
+                     r"(?:\s+(?:for me|please|in chrome|in the browser))*[.!?]*$", re.I)
+FORWARD_RX = re.compile(LEAD + r"(?:(?:go|navigate) forward|forward|(?:press|hit|click|tap)(?: on)? (?:the )?forward"
+                        r"(?: arrow| button)?|go to the next page|forward(?: arrow| button))(?: (?:a|one) page| page)?"
+                        r"(?:\s+(?:for me|please|in chrome|in the browser))*[.!?]*$", re.I)
+
+
+@dataclass
+class NavPlan:
+    action: str   # back | forward
+
 
 def _title_case(name: str) -> str:
     return " ".join(w[:1].upper() + w[1:] for w in name.split())
 
 
-def parse(goal: str) -> SitePlan | TabPlan | str | None:
+def parse(goal: str) -> "SitePlan | TabPlan | NavPlan | str | None":
     """A plan, REFUSE for "go to X and post ...", or None when this isn't a request to open a site or tab."""
     text = " ".join(goal.replace("’", "'").split())
+    if BACK_RX.match(text):
+        return NavPlan("back")
+    if FORWARD_RX.match(text):
+        return NavPlan("forward")
     if CLOSE_TAB_RX.match(text):
         return TabPlan("close")
     if m := NEW_TAB_RX.match(text):
@@ -203,6 +221,34 @@ async def summary(page: dict) -> str:
 def _sentence(text: str) -> str:
     text = text.strip()
     return text if text.endswith((".", "!", "?", "...")) else text + "."
+
+
+def history_step(browser, action: str) -> bool:
+    """Press the browser's back or forward arrow. False when there is no page that way."""
+    h = browser.call("Page.getNavigationHistory") or {}
+    entries, i = h.get("entries") or [], h.get("currentIndex", 0)
+    page = lambda e: (e.get("url") or "").split("#")[0]   # noqa: E731
+    here, step = page(entries[i]) if 0 <= i < len(entries) else "", -1 if action == "back" else 1
+    j = i + step
+    # skip entries a site pushed for the same page, and the blank page a new tab starts on
+    while 0 <= j < len(entries) and (page(entries[j]) == here or page(entries[j]).startswith(("about:", "chrome:"))):
+        j += step
+    if not 0 <= j < len(entries):
+        return False
+    browser.call("Page.navigateToHistoryEntry", entryId=entries[j]["id"])
+    want = page(entries[j])
+    # the old page lingers for a moment: wait until the tab shows the page we went to and has loaded
+    _wait(browser, "(() => [location.href, document.readyState])()",
+          ready=lambda v: bool(v and v[0].split("#")[0] == want and v[1] != "loading"), timeout=4.0)
+    return True
+
+
+def nav_say(action: str, page: dict) -> str:
+    title = title_of(page)
+    if "google.com/search" in page.get("url", "") and title:
+        title = f"the Google results for {title}"
+    head = "Went back" if action == "back" else "Went forward"
+    return f"{head}. You're on {title}." if title else f"{head}."
 
 
 def new_tab_say() -> str:

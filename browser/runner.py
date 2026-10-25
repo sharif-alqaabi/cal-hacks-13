@@ -458,6 +458,19 @@ def tab_run(task_id: str, plan: sites.TabPlan) -> str:
     return sites.new_tab_say()
 
 
+def nav_run(task_id: str, plan: sites.NavPlan) -> str:
+    """The back / forward arrows in the working tab. Search results, YouTube results and the inbox stay usable."""
+    agent = store.current
+    if agent is None:
+        raise Failed("There's no page of mine open.")
+    tracelog.emit(task_id, "act", f"press the {plan.action} arrow")
+    if not sites.history_step(agent.browser, plan.action):
+        raise Failed("There's no earlier page in this tab." if plan.action == "back" else "There's no page to go forward to.")
+    page = sites.read(agent.browser, fallback=agent.state.get("page"))
+    tracelog.emit(task_id, "read", f"{page.get('title') or '(no title)'} | {page.get('url', '')}")
+    return sites.nav_say(plan.action, page)
+
+
 def send_and_verify(task: Task) -> str:
     b, name = task.agent.browser, task.plan.to_name
     try:
@@ -527,6 +540,11 @@ async def run_task(goal: str) -> dict:
                           else f"Read the email from {plan.sender}" if plan.sender else f"Read email {plan.pick}")
             out = await _in_browser(inbox_run, task_id, plan, timeout=deadline - time.monotonic() + 4)
             say = out.get("say") or inbox.read_say(out["mail"], out["msg"], await inbox.body_line(out["msg"].get("body", "")))
+            tracelog.emit(task_id, "answer", say, ms=int((time.monotonic() - t0) * 1000))
+            return _reply(task_id, say)
+        if isinstance(plan, goals.NavPlan):   # keeps the open tab
+            tracelog.emit(task_id, "plan", f"Go {plan.action}")
+            say = await _in_browser(nav_run, task_id, plan, timeout=deadline - time.monotonic() + 4)
             tracelog.emit(task_id, "answer", say, ms=int((time.monotonic() - t0) * 1000))
             return _reply(task_id, say)
         if isinstance(plan, goals.YouTubePlan):   # pause/resume/pick keep the open tab, so no close_current here

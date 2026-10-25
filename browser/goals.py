@@ -14,7 +14,7 @@ import llm
 import sites
 import youtube
 from inbox import InboxPlan
-from sites import SitePlan, TabPlan
+from sites import NavPlan, SitePlan, TabPlan
 from youtube import YouTubePlan
 
 log = logging.getLogger("browser.goals")
@@ -113,7 +113,7 @@ def _inbox(goal: str) -> InboxPlan | Unsupported | None:
     return Unsupported(mail) if isinstance(mail, str) else mail
 
 
-def _site(goal: str) -> SitePlan | TabPlan | Unsupported | None:
+def _site(goal: str) -> SitePlan | TabPlan | NavPlan | Unsupported | None:
     site = sites.parse(goal)
     return Unsupported(site) if isinstance(site, str) else site
 
@@ -122,7 +122,7 @@ def _lookup(goal: str, query: str) -> LookupPlan:
     return LookupPlan(query=query, listing=bool(LISTING_RX.match(goal.strip())))
 
 
-Plan = EmailPlan | LookupPlan | YouTubePlan | SitePlan | TabPlan | InboxPlan | Unsupported
+Plan = EmailPlan | LookupPlan | YouTubePlan | SitePlan | TabPlan | NavPlan | InboxPlan | Unsupported
 
 
 def parse_regex(goal: str) -> Plan:

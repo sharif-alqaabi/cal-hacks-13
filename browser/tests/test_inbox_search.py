@@ -88,3 +88,21 @@ def test_inbox_list_and_read():
 
 def test_read_without_listing_first():
     assert run("read the email from Sam").startswith("From Sam Lee")
+
+
+def test_back_and_forward_phrases():
+    for text in ["go back", "back", "go back a page", "press the back button", "previous page", "hit back please"]:
+        assert p(text) == goals.NavPlan("back"), text
+    for text in ["go forward", "forward", "click the forward arrow", "go forward a page"]:
+        assert p(text) == goals.NavPlan("forward"), text
+    assert not isinstance(p("go back to the car"), goals.NavPlan)
+
+
+def test_back_and_forward_after_opening_a_result():
+    assert run("go back") == "There's no page of mine open."
+    run("search for Ace Hardware Polk")
+    run("open the second result")
+    assert run("go back") == "Went back. You're on the Google results for Google."
+    assert run("go back") == "There's no earlier page in this tab."
+    assert run("go forward") == "Went forward. You're on Yelp."
+    assert run("open the third result").startswith("Opened example.com")

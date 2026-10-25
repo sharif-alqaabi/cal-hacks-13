@@ -111,7 +111,8 @@ WEB = ["any new emails?", "do I have any new emails", "read my inbox", "check my
        "read the one from Sam", "read the email from Sam", "search for best tacos in San Francisco",
        "google Cal Hacks judging", "open the second result", "open the first link", "click on second result",
        "open the second website", "go to the second one", "click the second link", "open result number two", "click two",
-       "first one", "the first one", "number one", "the second result", "what about the first one"]
+       "first one", "the first one", "number one", "the second result", "what about the first one",
+       "go back", "back", "go forward", "press the back button", "go back a page", "previous page"]
 
 
 def test_inbox_and_search_short_circuit(fake):
@@ -119,7 +120,7 @@ def test_inbox_and_search_short_circuit(fake):
     for text in WEB:
         intent, source, _ = asyncio.run(router.route(text))
         assert (intent, source) == ("browser", "keywords"), text
-    for text in ["what's in front of me", "where did I leave my keys", "read this sign", "go to the second floor"]:
+    for text in ["what's in front of me", "where did I leave my keys", "read this sign", "go to the second floor", "go back to the car"]:
         assert not router.WEB_RX.match(text), text
 
 

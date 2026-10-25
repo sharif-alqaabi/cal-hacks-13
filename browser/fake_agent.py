@@ -120,8 +120,18 @@ class FakeBrowser:
     # ---- CDP surface ------------------------------------------------------
 
     def call(self, method: str, **params):
+        hist = self.__dict__.setdefault("history", [self.url])
+        self.__dict__.setdefault("at", 0)
         if method == "Page.navigate":
             self.url = params["url"]
+            del hist[self.at + 1:]
+            hist.append(self.url)
+            self.at = len(hist) - 1
+        elif method == "Page.getNavigationHistory":
+            return {"currentIndex": self.at, "entries": [{"id": i, "url": u} for i, u in enumerate(hist)]}
+        elif method == "Page.navigateToHistoryEntry":
+            self.at = params["entryId"]
+            self.url = hist[self.at]
         elif method == "Page.addScriptToEvaluateOnNewDocument":
             self.dom_guard = True
         return {}
@@ -159,6 +169,8 @@ class FakeBrowser:
                     "body": BODIES[t]} if row and self._kind() == "thread" else None
         if expression == "location.href":
             return self.url
+        if expression == "(() => [location.href, document.readyState])()":
+            return [self.url, "complete"]
         if expression == gmail.SENT_ROWS_JS:
             return self._sent_rows() if self._kind() == "sent" else []
         return None
