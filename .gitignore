@@ -5,6 +5,10 @@ node_modules/
 dist/
 memory/thumbs/
 *.tsbuildinfo
+phone/ios/Config.xcconfig
+phone/ios/*.xcodeproj/
+phone/fixtures/*
+!phone/fixtures/README.md
 browser/logs/
 browser/traces/
 .pytest_cache/

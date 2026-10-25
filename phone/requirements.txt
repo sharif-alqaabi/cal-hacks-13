@@ -1,0 +1,5 @@
+# phone/tools/recorder.py and phone/replay.py (recorder imports core/contracts, hence pydantic)
+websockets>=12
+pydantic>=2.7
+numpy>=1.26
+opencv-python>=4.9
