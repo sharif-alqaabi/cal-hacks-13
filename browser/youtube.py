@@ -41,7 +41,8 @@ SEARCH_RX = re.compile(LEAD + r"(?:find|search(?: youtube)?(?: for)?|look up|loo
                        r"(?P<q>.+?)" + TAIL, re.I)
 SEARCH_YT_RX = re.compile(LEAD + r"(?:search|look up|find|look for)\s+(?:on\s+)?youtube\s+(?:for\s+)?(?P<q>.+?)[.!?]*$", re.I)
 PLAY_RX = re.compile(LEAD + r"(?:play|put on|watch)\s+(?:me\s+)?(?:a video (?:about|of|on)\s+)?(?P<q>.+?)" + TAIL, re.I)
-OPEN_RX = re.compile(LEAD + r"(?:open|go to|launch|pull up|bring up)\s+(?:up\s+)?youtube(?:\s+and)?\s*", re.I)
+OPEN_RX = re.compile(LEAD + r"(?:(?:open|go to|go on|get on|hop on|jump on|head to|head over to|launch|pull up|bring up|"
+                     r"use)\s+(?:up\s+)?|on\s+)?youtube(?:\s*,?\s*(?:and|then)\b)?\s*", re.I)
 GENERIC_SEARCH_RX = re.compile(r"^(?:search|find|look up|look for|show me|get me|pull up)\s+(?:up\s+)?(?:for\s+)?(?:some\s+|a\s+)?"
                                r"(?:(?:youtube\s+)?(?:videos?|clips?)\s+(?:about|on|of|for|with)\s+)?(?P<q>.+?)" + TAIL, re.I)
 UNSAFE_RX = re.compile(r"\b(subscribe|unsubscribe|comment|like (?:it|this|the video|that)|dislike|upload|post|"
@@ -92,6 +93,8 @@ def parse(goal: str) -> YouTubePlan | str | None:
         if m := GENERIC_SEARCH_RX.match(rest):
             q = m.group("q").strip()
             return YouTubePlan("open") if q.lower() in {"videos", "a video", "something", "youtube"} else YouTubePlan("search", query=q)
+        if rest != text and text.lower().startswith("youtube") and (q := rest.strip(" .!?")):   # "youtube lofi beats"
+            return YouTubePlan("search", query=q)
     return None
 
 
