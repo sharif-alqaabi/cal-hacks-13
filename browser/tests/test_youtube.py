@@ -1,4 +1,6 @@
 """YouTube goal: parsing and what gets spoken (no Chrome)."""
+import pytest
+
 import goals
 import youtube
 from youtube import Video, YouTubePlan
@@ -70,3 +72,22 @@ def test_short_titles():
 
 def test_clean_drops_emoji():
     assert youtube._clean("lofi hip hop radio 📚 beats | study") == "lofi hip hop radio beats, study"
+
+
+@pytest.mark.parametrize("text,query", [
+    ("go on youtube and search lofi", "lofi"),
+    ("can you go on youtube and search for cat videos", "cat videos"),
+    ("get on youtube and look for lofi", "lofi"),
+    ("hop on youtube and look up cooking", "cooking"),
+    ("on youtube search lofi", "lofi"),
+    ("youtube search lofi", "lofi"),
+    ("youtube lofi beats", "lofi beats"),
+    ("open youtube, then search lofi", "lofi"),
+])
+def test_open_youtube_then_search(text, query):
+    assert youtube.parse(text) == youtube.YouTubePlan("search", query=query)
+
+
+def test_open_youtube_then_play():
+    assert youtube.parse("get on youtube and play lofi") == youtube.YouTubePlan("play", query="lofi")
+    assert youtube.parse("go on youtube") == youtube.YouTubePlan("open")
