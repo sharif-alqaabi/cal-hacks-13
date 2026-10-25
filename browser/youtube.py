@@ -14,8 +14,14 @@ from dataclasses import dataclass
 from urllib.parse import quote_plus
 
 import agents
+import sites
 
 log = logging.getLogger("browser.youtube")
+
+OTHER_SITE_RX = re.compile(
+    r"\b(?:on|in|from|via|using)\s+(?:" + "|".join(re.escape(k) for k in sites.KNOWN) + r")\b",
+    re.I,
+)
 
 TOP_N = 3
 LOAD_S = 8.0
@@ -69,6 +75,8 @@ class Video:
 def parse(goal: str) -> YouTubePlan | str | None:
     """A plan, REFUSE for unsafe YouTube asks, or None when this isn't a YouTube request."""
     text = " ".join(goal.replace("’", "'").split())
+    if OTHER_SITE_RX.search(text) and not re.search(r"\bon youtube\b", text, re.I):
+        return None
     if MENTIONS_RX.search(text) and UNSAFE_RX.search(text):
         return REFUSE
     if PAUSE_RX.match(text):

@@ -1,8 +1,10 @@
 import asyncio
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 import goals
+import youtube
 
 
 @pytest.mark.parametrize("text,name,message", [
@@ -66,3 +68,37 @@ def test_contacts_parsing(monkeypatch):
     monkeypatch.setattr(config, "DEMO_CONTACTS", "Sam=a@x.com, Mom = m@x.com")
     assert goals.contacts() == {"sam": "a@x.com", "mom": "m@x.com"}
     assert goals.resolve("mom") == "m@x.com" and goals.resolve("b@y.com") == "b@y.com"
+
+
+def test_play_on_spotify_not_youtube():
+    assert youtube.parse("play Bohemian Rhapsody on Spotify") is None
+    p = goals.parse_regex("play Bohemian Rhapsody on Spotify")
+    assert not isinstance(p, goals.YouTubePlan)
+
+
+def test_web_plan_from_claude_json():
+    j = {"kind": "web", "url": "https://open.spotify.com/search/bohemian%20rhapsody",
+         "goal": "Play the first song result.", "site": "Spotify"}
+    p = goals._web(j)
+    assert isinstance(p, goals.WebPlan)
+    assert p.url.startswith("https://")
+    assert goals.JEV_SUFFIX.strip() in p.goal
+
+
+@pytest.mark.parametrize("j", [
+    {"kind": "web", "url": "http://evil.com", "goal": "click", "site": "Evil"},
+    {"kind": "web", "url": "https://open.spotify.com/", "goal": "", "site": "Spotify"},
+    {"kind": "web", "url": "https://x.com", "goal": "buy the premium plan", "site": "X"},
+])
+def test_web_plan_refused_or_invalid(j):
+    p = goals._web(j)
+    assert p is None or isinstance(p, goals.Unsupported)
+
+
+def test_parse_web_with_mock_claude():
+    payload = {"kind": "web", "url": "https://open.spotify.com/search/test",
+               "goal": "Play the first track.", "site": "spotify"}
+    with patch.object(goals.llm, "available", return_value=True), \
+         patch.object(goals.llm, "ask_json", new=AsyncMock(return_value=payload)):
+        p = asyncio.run(goals.parse("open Spotify and play Bohemian Rhapsody"))
+    assert isinstance(p, goals.WebPlan) and p.site == "Spotify"

@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 import app as service
 import config
 import fake_agent
+import goals
 import guard
 import runner
 import tracelog
@@ -188,3 +189,18 @@ def test_trace_shows_each_step(client):
 def test_work_without_claude(client):
     r = client.post("/work", json={"utterance": "is this right for order 12", "jpeg_b64": "AAAA"})
     assert CoreSayResp.model_validate(r.json()).say == "Work mode needs the Claude key."
+
+
+async def _spotify_web_plan(_goal):
+    return goals.WebPlan(
+        url="https://open.spotify.com/search/bohemian%20rhapsody",
+        goal="Play the first song result. Never post, buy, pay, sign in or delete anything.",
+        site="Spotify",
+    )
+
+
+def test_web_planner_task(client, monkeypatch):
+    monkeypatch.setattr(runner.goals, "parse", _spotify_web_plan)
+    r = task(client, "open Spotify and play Bohemian Rhapsody")
+    assert r.say.startswith("Done on Spotify.")
+    assert not r.needs_confirm

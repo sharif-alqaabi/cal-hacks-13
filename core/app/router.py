@@ -74,7 +74,8 @@ JEV_CRITERIA = {
     "remember": "Introduces a person or asks to remember something",
     "lost": "Says they are lost, need help, or want their family told where they are",
     "browser": "Wants a task done on the laptop or web, like sending an email, reading new emails (\"any new emails?\", \"read the one from Sam\"), searching Google or opening a search result, opening a website (\"go to Instagram\"), opening or closing a tab, "
-               "or YouTube: finding, playing, picking (\"play number two\"), pausing or resuming a video",
+               "YouTube: finding, playing, picking (\"play number two\"), pausing or resuming a video, "
+               "or anything else on a website, like playing a song on Spotify",
     "confirm": "Answers yes or no to a pending draft",
     "task": "Work mode: checks whether a held item is the right one for an order",
     "other": "Anything else, small talk or a general question",
@@ -88,7 +89,8 @@ ROUTER_SYSTEM = (
     "(where something was left or last seen, what else was somewhere, who they met, "
     "what someone wore, \"do you know where my keys are\", \"have you seen\"); "
     "remember=introducing a person or asking to remember something; lost=lost or needs help; "
-    "browser=email/web task on the laptop, including reading the inbox (any new emails, read the one from Sam), a Google search and opening one of its results, opening a website (go to Instagram, open nytimes.com), opening or closing a browser tab, and YouTube (find, play, pick a numbered result, pause, resume a video); confirm=yes/no answer to a pending draft; task=checking items in work mode; other=anything else."
+    "browser=email/web task on the laptop, including reading the inbox (any new emails, read the one from Sam), a Google search and opening one of its results, opening a website (go to Instagram, open nytimes.com), opening or closing a browser tab, YouTube (find, play, pick a numbered result, pause, resume a video), "
+    "or anything else on a website (e.g. play a song on Spotify); confirm=yes/no answer to a pending draft; task=checking items in work mode; other=anything else."
 )
 
 

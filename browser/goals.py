@@ -7,6 +7,7 @@ the call fails or it takes more than 3 s. Recipients only come from DEMO_CONTACT
 import logging
 import re
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 import config
 import inbox
@@ -35,12 +36,19 @@ class LookupPlan:
 
 
 @dataclass
+class WebPlan:
+    url: str    # https start page, ideally the site's own search URL
+    goal: str   # one short instruction for Jev Ultrafast
+    site: str   # spoken name, e.g. "Spotify"
+
+
+@dataclass
 class Unsupported:
     say: str
 
 
-NOT_SUPPORTED = ("On the laptop I can send an email, read your new emails, look something up, open a website "
-                 "or play YouTube videos.")
+NOT_SUPPORTED = ("On the laptop I can send an email, read your new emails, look something up, open a website, "
+                 "play YouTube videos, or do simple things on other websites.")
 NO_MONEY = "I can't buy or pay for things. I can send an email or look something up."
 
 MONEY_RX = re.compile(r"\b(buy|purchase|pay|order|checkout|check out|subscribe|donate|transfer money|venmo)\b", re.I)
@@ -59,12 +67,19 @@ LOOKUP_STRIP = re.compile(LEAD + r"(?:look up|search for|search|google|find out)
 LISTING_RX = re.compile(LEAD + r"(?:search|google)(?: google| search)?(?:\s+for)?\s+"
                         r"(?!(?:for|google|search|when|what|how|where|who|why|is|are|does|do|can)\b)", re.I)
 
+JEV_SUFFIX = " Never post, buy, pay, sign in or delete anything."
+
 PARSE_SYSTEM = """You turn a blind user's spoken request for their laptop into JSON. Reply with JSON only:
-{"kind": "email" | "lookup" | "unsupported", "to_name": "", "message": "", "subject": "", "query": ""}
+{"kind": "email" | "lookup" | "web" | "unsupported", "to_name": "", "message": "", "subject": "", "query": "",
+ "url": "", "goal": "", "site": ""}
 email: to_name is the recipient exactly as spoken (usually a first name); message is the email body in the
 user's own first-person voice, one or two short sentences, keeping their words; subject is 3 to 7 words.
 lookup: query is a short web search query that answers the question.
-unsupported: anything else, including purchases, payments, passwords, uploads or apps other than the web browser."""
+web: a task on a website in Chrome (not YouTube, not Gmail, not opening a site only to read it). url is an https
+start page that gets close to the goal (prefer the site's own search URL when possible, e.g.
+https://open.spotify.com/search/bohemian%20rhapsody). goal is one short instruction for a browser agent on that page.
+site is the spoken site name (e.g. Spotify).
+unsupported: purchases, payments, passwords, uploads, desktop apps, or anything outside the web browser."""
 
 
 def contacts() -> dict[str, str]:
@@ -122,7 +137,26 @@ def _lookup(goal: str, query: str) -> LookupPlan:
     return LookupPlan(query=query, listing=bool(LISTING_RX.match(goal.strip())))
 
 
-Plan = EmailPlan | LookupPlan | YouTubePlan | SitePlan | TabPlan | NavPlan | InboxPlan | Unsupported
+def _valid_https(url: str) -> bool:
+    try:
+        p = urlparse(url.strip())
+        return p.scheme == "https" and bool(p.netloc)
+    except Exception:
+        return False
+
+
+def _web(j: dict) -> WebPlan | Unsupported | None:
+    url, goal, site = (j.get("url") or "").strip(), (j.get("goal") or "").strip(), (j.get("site") or "").strip()
+    if not url or not goal or not site or not _valid_https(url):
+        return None
+    if MONEY_RX.search(goal) or sites.UNSAFE_RX.search(goal):
+        return Unsupported(sites.REFUSE if sites.UNSAFE_RX.search(goal) else NO_MONEY)
+    if not goal.endswith(JEV_SUFFIX.strip()):
+        goal = goal.rstrip(".") + "." + JEV_SUFFIX
+    return WebPlan(url=url, goal=goal, site=site[:1].upper() + site[1:] if site else site)
+
+
+Plan = EmailPlan | LookupPlan | YouTubePlan | SitePlan | TabPlan | NavPlan | InboxPlan | WebPlan | Unsupported
 
 
 def parse_regex(goal: str) -> Plan:
@@ -162,6 +196,10 @@ async def parse(goal: str) -> Plan:
                 return _email(j["to_name"], j.get("message", ""), j.get("subject", ""))
             if kind == "lookup" and j.get("query"):
                 return _lookup(goal, j["query"].strip())
+            if kind == "web":
+                web = _web(j)
+                if web is not None:
+                    return web
             if kind == "unsupported":
                 return Unsupported(NOT_SUPPORTED)
         log.info("claude parse unavailable or unusable, using rules")

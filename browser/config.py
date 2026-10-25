@@ -30,6 +30,7 @@ VERIFY_CANCEL = _flag("VERIFY_CANCEL")   # after "cancel", check Sent is still c
 TASK_BUDGET_S = float(os.getenv("TASK_BUDGET_S", "32"))
 CONFIRM_BUDGET_S = float(os.getenv("CONFIRM_BUDGET_S", "34"))
 LOOKUP_MAX_STEPS = int(os.getenv("LOOKUP_MAX_STEPS", "6"))
+WEB_MAX_STEPS = int(os.getenv("WEB_MAX_STEPS", "8"))
 TASK_TTL_S = float(os.getenv("TASK_TTL_S", "600"))
 
 LOG_DIR = Path(os.getenv("BROWSER_LOG_DIR", str(HERE / "logs")))

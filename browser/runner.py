@@ -470,6 +470,15 @@ def inbox_run(task_id: str, plan: inbox.InboxPlan) -> dict:
     return {"mail": mail, "msg": msg}
 
 
+def web_run(task_id: str, plan: goals.WebPlan, deadline: float) -> tuple[Outcome, object, dict]:
+    """Jev Ultrafast on a Claude-planned start page and goal; guard holds irreversible clicks."""
+    agent = _start(task_id, plan.url, plan.goal, plan.site)
+    out = drive(agent, task_id, deadline, max_steps=config.WEB_MAX_STEPS)
+    page = sites.read(agent.browser, fallback=agent.state.get("page"))
+    tracelog.emit(task_id, "read", f"{page.get('title') or '(no title)'} | {page.get('url', '')}")
+    return out, agent, page
+
+
 def site_open(task_id: str, plan: sites.SitePlan) -> dict:
     """Open the site (via Google's first result when the name isn't known) and read the page. Never clicks anything."""
     if plan.url:
@@ -608,6 +617,21 @@ async def run_task(goal: str) -> dict:
                 tracelog.emit(task_id, "answer", say, ms=int((time.monotonic() - t0) * 1000))
                 return _reply(task_id, say)
             plan = plan.site   # "open a new tab and go to Reddit": the old tab is kept, open the site in a new one
+        elif isinstance(plan, goals.WebPlan):
+            await _in_browser(store.close_current, timeout=5)
+            tracelog.emit(task_id, "plan", f"{plan.site}: {plan.goal}")
+            out, agent, page = await _in_browser(web_run, task_id, plan, deadline,
+                                                 timeout=deadline - time.monotonic() + 4)
+            if out.kind == "parked":
+                label = (out.action or {}).get("label", "that")
+                say = f"I stopped before pressing {label} on {plan.site}. Nothing was done."
+            elif out.kind == "done":
+                line = await sites.summary(page)
+                say = f"Done on {plan.site}." + (f" {line}" if line else "")
+            else:
+                say = explain(out, agent, plan.site, email=False)
+            tracelog.emit(task_id, "answer", say, ms=int((time.monotonic() - t0) * 1000))
+            return _reply(task_id, say)
         else:
             await _in_browser(store.close_current, timeout=5)
         if isinstance(plan, goals.SitePlan):
@@ -658,6 +682,7 @@ async def run_task(goal: str) -> dict:
     except asyncio.TimeoutError:
         say = ("I ran out of time on Gmail. Nothing was sent." if email
                else "I ran out of time on YouTube." if isinstance(plan, goals.YouTubePlan)
+               else f"I ran out of time on {plan.site}." if isinstance(plan, goals.WebPlan)
                else f"I ran out of time opening {plan.name}." if isinstance(plan, goals.SitePlan)
                else "I ran out of time with the tabs." if isinstance(plan, goals.TabPlan)
                else "I ran out of time reading your email." if isinstance(plan, goals.InboxPlan)
