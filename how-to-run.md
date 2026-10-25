@@ -1,114 +1,122 @@
 # How to run
 
-Two services run on one laptop: **core** (port 8000, what the phone talks to) and **memory** (port 8001, core calls it over localhost). The browser part is still a stub on 8002.
+Three services run on one laptop: **core** (port 8000, what the phone talks to), **memory** (port 8001) and the **browser agent** (port 8002, drives a separate demo Chrome for email and lookups). Core calls the other two over localhost.
 
 ## 1. One-time setup
+
+```
+brew install cloudflared
+```
 
 **Core**
 ```bash
 cd core
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt -r tests/requirements.txt
-cp .env.example .env
 python -m tests.make_fixtures   # test frames + spoken WAVs (fixtures are gitignored; audio needs macOS)
 ```
+Set up .env from the .env.example
 
 **Memory**
 ```bash
 cd memory
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env
 ```
+Set up .env from the .env.example. The first time memory starts it downloads two small face models (about 38 MB, from the OpenCV model zoo on GitHub) into `memory/models/`; until they arrive, faces are simply not recognised.
 
-## 2. Env files
+**Browser agent** (email and lookups)
+```bash
+brew install uv
+cd browser
+uv sync
+```
+Set up .env from the .env.example. The three keys are different: `TYPESAFE_API_KEY` and `ANTHROPIC_API_KEY` are the same values as in `core/.env`, and only `TEXT_MODEL_API_KEY` is the OpenRouter key. Keep `BU_CDP_URL=http://127.0.0.1:9222` in it.
 
-Each part has its own `.env`. Never commit them, and ask Kevin for the values rather than pasting them in chat.
+Then sign in to the demo Chrome once (it's a separate profile, never your everyday Chrome):
+```bash
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --user-data-dir=$HOME/chrome-demo --remote-debugging-port=9222
+```
+In that window, sign in to the **throwaway Gmail** only, and set Settings > General > Undo send to 5 seconds. Quit it when done; run.sh reopens it. `browser-harness --doctor` says FAIL for the daemon until the service is running; that's normal.
 
-- **`core/.env`**: `ANTHROPIC_API_KEY`, `CARTESIA_API_KEY`, `CARTESIA_VOICE_ID`, `TYPESAFE_API_KEY`, plus `MEMORY_URL` / `BROWSER_URL` (default to `http://127.0.0.1:8001` and `:8002`). Set `DEMO_MODE=true` at the demo table. Everything else has defaults. Core still runs with keys missing, just with fallbacks.
-- **`memory/.env`**: `MOSS_PROJECT_ID`, `MOSS_PROJECT_KEY`, `SPACETIME_DB`, `SPACETIME_TOKEN`, `ANTHROPIC_API_KEY`, and `MEMORY_PUBLIC_URL` (only needed for a public dashboard, see section 5). Memory doesn't load `.env` itself, so source it first (below).
+**Dashboard** (needs Node)
+```bash
+cd dashboard
+npm install
+```
+Optional: `.env` from `.env.example` only to point at a different SpacetimeDB.
 
-## 3. Run it
+## 2. Run it
 
-**Core with stubs** (fake memory and browser, nothing else needed):
+run.sh is true source of running everything
+
+From the repo root, this starts memory (8001), core (8000), the browser agent (8002) with the demo Chrome, and the Cloudflare tunnel to core. Ctrl-C stops all of them. Add `--no-tunnel` to skip the tunnel.
+```bash
+bash run.sh
+```
+It also starts the family dashboard, then opens the mirror (http://localhost:8000/mirror), and the dashboard (http://localhost:5173) in your browser, then the tunnel URL once it works.
+
+## 3. Give Server URL to the phone (Cloudflare quick tunnel)
+
+`bash run.sh` starts the tunnel too. Once the tunnel is connected, its `https://<random-words>.trycloudflare.com` URL opens in your browser. If the page doesn't load yet, wait 10 to 20 seconds and refresh. In the phone app, use `wss://<random-words>.trycloudflare.com/stream`. The URL changes every run.
+
+## 4. Optional: manual testing without the phone
+
+You don't need these for the real setup. They let you try things with `bash run.sh` running and no phone app.
+
+**Mirror page.** Open http://localhost:8000/mirror and click **Enable audio**. Hold **Space** to talk through the laptop mic, or type a sentence in the box, like `where did I put my keys`. You'll hear the reply and see the transcript.
+
+**Fake glasses.** This pretends to be the phone and streams frames to core. In a second terminal:
 ```bash
 cd core && source .venv/bin/activate
-bash tests/run_with_stubs.sh      # memory stub :8001, browser stub :8002, core :8000
+python -m tests.fake_glasses                                  # laptop webcam
+python -m tests.fake_glasses --images tests/fixtures/chair_walk  # a folder of JPEGs
+python -m tests.fake_glasses --video walk.mp4                 # a video clip
 ```
+Once it's running, type a sentence and press Enter to "say" it, `/ptt` to record from the mic, or `/wav tests/fixtures/audio/keys.wav` to play a recording.
 
-**Core with real memory** (starts both, runs the memory demo beats, then shuts down):
-```bash
-bash core/tests/integration/run_with_memory.sh                   # needs memory/.env
-bash core/tests/integration/run_with_memory.sh --local-backends  # Moss/SpacetimeDB faked locally
-```
-Note: this wipes or cleans up the test data it writes to SpacetimeDB.
+## 5. Demo phrases that always hit their intent
 
-**Both running for real, to keep up:**
-```bash
-# terminal 1
-cd memory && source .venv/bin/activate && set -a && source .env && set +a
-uvicorn app:app --port 8001
-# terminal 2
-cd core && source .venv/bin/activate
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
+Every phrase below was run through the live router on 2026-10-24 and landed on its intent through Jev, Claude and the keyword fallback. Say them close to word for word. Phrases marked *(slower)* were decided by Claude rather than Jev, about 0.7 s instead of 0.1 s, so prefer the others on stage.
 
-## 4. Mirror page and fake glasses
+| Intent | What it does | Say |
+|---|---|---|
+| describe | Describes the current view | "What's in front of me?" · "Describe what's around me." · "What do you see in front of me?" |
+| signal | Reads a pedestrian signal | "Is the walk sign on?" · "Can I cross at this crosswalk?" · "What color is the traffic light?" |
+| remember | Saves a person or a fact with the current frame | "This is my friend Kevin." · "Meet my friend Sam." · "Remember that my keys are in the top drawer." |
+| recall | Answers from memory | "Where did I put my keys?" · "Do you know where my keys are?" · "What was Kevin wearing?" · "What else was on the table?" · "Where are my glasses?" · "When did I leave home?" *(slower)* |
+| lost | Alerts the family dashboard | "I'm lost." · "Help me, I'm lost." · "I need help." |
+| browser | Starts a laptop/web task | "Email my mom that I'm running late." · "Send an email to Sam saying I'll be there soon." · "Look up the hours for the nearest pharmacy." |
+| task | Work mode item check | "Is this the right item?" · "Check this against the order." · "Next item." *(slower)* |
+| confirm | Answers a waiting draft | "Yes, send it." · "No, cancel." |
 
-- Open http://localhost:8000/mirror, click **Enable audio**, then hold **Space** to talk or type in the box (e.g. `where did I put my keys`). With no phone connected, the mirror drives a session on its own.
-- To stand in for the phone:
-  ```bash
-  cd core && source .venv/bin/activate
-  python -m tests.fake_glasses                               # laptop webcam
-  python -m tests.fake_glasses --images tests/fixtures/chair_walk
-  python -m tests.fake_glasses --video walk.mp4
-  ```
-  In it, type a sentence and press Enter, `/ptt` to record from the mic, or `/wav tests/fixtures/audio/keys.wav`.
+Tips:
+- Introduce a person ("This is my friend Kevin.") while they are in view, before asking what they wore. Recall only knows people who were introduced.
+- Hold an object in view for about 5 seconds before asking where it is, so a captioned frame catches it.
+- Keep the words help, walk and light out of other requests, and email, send and search out of describe questions: the keyword fallback checks those intents first.
 
-## 5. Public URL for the phone (Cloudflare quick tunnel)
+### Browser phrases, by goal
 
-Free, no account, supports WebSockets.
-```bash
-brew install cloudflared
-bash tests/run_with_stubs.sh                        # terminal 1 (or the real setup above)
-cloudflared tunnel --url http://localhost:8000      # terminal 2
-```
-Terminal 2 prints `https://<random-words>.trycloudflare.com`. **The URL changes every time you restart cloudflared**, so re-share it and update the phone app each time. It can take 10 to 20 seconds to start working.
+Each phrase below was run through the live core router (all landed on browser) and through the browser agent's parser (all gave the plan shown) on 2026-10-25. Email only goes to names in `DEMO_CONTACTS` in `browser/.env` (by default just **Sam**). Ask for anything else by name and it won't guess an address.
 
-**Test it, simplest first:**
-1. **Health:** on a phone with wifi off, open `https://<url>/health`. You should see JSON.
-2. **Mirror:** open `https://<url>/mirror` on the phone, type `where did I put my keys`, and hear the reply.
-3. **WebSocket:** on the laptop, `npx wscat -c wss://<url>/stream` should connect with no errors.
+| Goal | Say | What happens |
+|---|---|---|
+| Send an email | "Email Sam that I'm running late." · "Send an email to Sam saying I'll be there in ten minutes." · "Tell Sam I'm on my way." | Drafts it, reads it back, waits for "Yes, send it." or "No, cancel." |
+| List new email | "Any new emails?" · "Check my email." | Reads sender and subject of the newest three unread |
+| Read one email | "Read the one from Sam." · "Read the first one." · "Read it." | Opens and reads it briefly (after a list) |
+| Answer a question from the web | "Look up the hours for the nearest pharmacy." | Searches and says the answer |
+| Google results | "Search for best coffee in Berkeley." · "Google Cal Hacks." | Reads the top three results |
+| Open a result | "Open the second result." | Opens that Google result and says what's on it (search first) |
+| Open a website | "Go to Instagram." · "Open nytimes.com." · "Take me to Hacker News." | Opens it and says briefly what's on the page |
+| Tabs | "Open a new tab." · "Open a new tab and go to Reddit." · "Close this tab." | |
+| Back / forward | "Go back." · "Go forward." | Browser arrows |
+| Find YouTube videos | "Find videos about cats." · "Search YouTube for lofi music." | Reads the top results |
+| Play a YouTube result | "Play number two." | Plays that result (find videos first) |
+| Play directly | "Play lofi hip hop." · "Play the latest video from MrBeast." | |
+| Pause / resume | "Pause." · "Resume." | |
+| Refusals (safe to show) | "Go to Instagram and like the first post." · "Buy me a pair of shoes on Amazon." · "Delete the email from Sam." | Politely says it can't post, buy or delete |
 
-**The phone app connects to `wss://<url>/stream`.**
-
-If step 1 fails, check `http://localhost:8000/health` on the laptop first.
-
-Memory needs its own tunnel only if the family dashboard or recall photos get opened on another phone. Then run `cloudflared tunnel --url http://localhost:8001` and put that URL in `MEMORY_PUBLIC_URL`. If the dashboard is shown only on the laptop, skip it.
-
-## 6. Backup at the demo table: phone hotspot
-
-Venue wifi often blocks device-to-device traffic and can kill the tunnel. Turn on the phone's hotspot, join the laptop to it, find the laptop's IP (`ipconfig getifaddr en0`, usually `172.20.10.x`), and point the phone app at `ws://<laptop-ip>:8000/stream`. No tunnel needed. If the phone app fails entirely, use the mirror's Space-bar push-to-talk.
-
-## 7. Tests
-
-Run from `core/` with the venv active unless noted.
-
-**Offline** (no keys, no cost):
-
-| Command | Needs |
-|---|---|
-| `python -m pytest tests -q` | nothing |
-| `python -m tests.demo_script --offline` (add `--audio` for WAV input) | nothing, starts its own servers |
-| `memory/.venv/bin/python memory/selftest.py` (from repo root) | nothing |
-
-**Live** (real APIs, small cost):
-
-| Command | Needs |
-|---|---|
-| `python -m tests.smoke_apis all` (or `stt`, `tts`, `vision`, `jev`, `router`, `yolo`) | keys in `core/.env` |
-| `python -m tests.demo_script --live [--audio] [--only N]` | `bash tests/run_with_stubs.sh` running |
-| `bash core/tests/integration/run_with_memory.sh` (from repo root) | `core/.env` and `memory/.env` |
-| `set -a; source memory/.env; set +a; memory/.venv/bin/python memory/e2e.py` (from repo root) | `memory/.env`; wipes the database |
-
-Before a demo: `python -m tests.smoke_apis all` should be all PASS, then check every pill on the mirror is green.
+Notes:
+- Start a web question with "Look up". "When does Target close today?" and "What time is the Warriors game tonight?" were routed to `other`, not browser.
+- "Open the second result" and "Play number two" act on whatever was listed last: if YouTube results are showing, a number picks a video; otherwise it opens a Google result.
+- Saying "Read it." alone takes about 1.5 s to route (Claude decides it); the rest are instant or about 0.1 s.
