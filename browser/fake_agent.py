@@ -123,6 +123,10 @@ class FakeBrowser:
             to = self.fields["to"]
             return {"emails": gmail.EMAIL_RX.findall(to), "names": [], "to_text": to,
                     "subject": self.fields["subject"], "body": self.fields["body"]}
+        if expression == sites.PAGE_JS:
+            host = urlparse(self.url).hostname or ""
+            return {"ready": "complete", "url": self.url, "title": host.removeprefix("www.").split(".")[0].capitalize(),
+                    "description": "", "heading": "", "text": self._text()}
         if expression == sites.FIRST_RESULT_JS:
             return "https://www.calhacks.io/" if self._kind() == "search" else None
         if expression == gmail.SENT_ROWS_JS:

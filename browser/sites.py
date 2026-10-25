@@ -60,13 +60,39 @@ class SitePlan:
     name: str
 
 
+@dataclass
+class TabPlan:
+    action: str                  # new | close
+    site: SitePlan | None = None  # "open a new tab and go to Reddit"
+
+
+NEW_TAB_RX = re.compile(LEAD + r"(?:open|start|make|give me|pull up)\s+(?:up\s+)?(?:a\s+)?(?:new|another|blank)\s+"
+                        r"(?:browser\s+)?tab(?:\s+(?:for me|please|in chrome))*(?:\s*,?\s*and\s+(?P<rest>.+?))?[.!?]*$", re.I)
+CLOSE_TAB_RX = re.compile(LEAD + r"close\s+(?:this|the|that|my|the current)?\s*(?:browser\s+)?tab"
+                          r"(?:\s+(?:for me|please|in chrome))*[.!?]*$", re.I)
+NEW_TAB_URL = "https://www.google.com/"
+
+
 def _title_case(name: str) -> str:
     return " ".join(w[:1].upper() + w[1:] for w in name.split())
 
 
-def parse(goal: str) -> SitePlan | str | None:
-    """A plan, REFUSE for "go to X and post ...", or None when this isn't a request to open a site."""
+def parse(goal: str) -> SitePlan | TabPlan | str | None:
+    """A plan, REFUSE for "go to X and post ...", or None when this isn't a request to open a site or tab."""
     text = " ".join(goal.replace("’", "'").split())
+    if CLOSE_TAB_RX.match(text):
+        return TabPlan("close")
+    if m := NEW_TAB_RX.match(text):
+        if not m.group("rest"):
+            return TabPlan("new")
+        site = _site(m.group("rest"))
+        if site is None:
+            return REFUSE if UNSAFE_RX.search(m.group("rest")) else None
+        return site if isinstance(site, str) else TabPlan("new", site)
+    return _site(text)
+
+
+def _site(text: str) -> SitePlan | str | None:
     m = OPEN_RX.match(text)
     if not m:
         return None
@@ -156,6 +182,10 @@ def _title(title: str, name: str) -> str:
     return _short(head or title, 8)
 
 
+def title_of(page: dict) -> str:
+    return _title(page.get("title", ""), "")
+
+
 async def summary(page: dict) -> str:
     text = page.get("text", "")
     if llm.available() and text.strip():
@@ -173,6 +203,10 @@ async def summary(page: dict) -> str:
 def _sentence(text: str) -> str:
     text = text.strip()
     return text if text.endswith((".", "!", "?", "...")) else text + "."
+
+
+def new_tab_say() -> str:
+    return "I opened a new tab on Google. Where should I go?"
 
 
 def say(plan: SitePlan, page: dict, line: str) -> str:

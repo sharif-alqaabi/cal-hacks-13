@@ -22,4 +22,5 @@ def fake_env(monkeypatch, tmp_path):
     work.reset()
     runner.store.pending.clear()
     runner.store.current = None
+    runner.store.kept.clear()
     yield

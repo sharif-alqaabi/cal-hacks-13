@@ -64,3 +64,34 @@ def test_run_task_resolves_unknown_site_via_google():
     out = asyncio.run(runner.run_task("open the cal hacks event page website"))
     assert "is open" in out["say"]
     assert runner.store.current.browser.url == "https://www.calhacks.io/"
+
+
+def test_tab_phrases():
+    assert p("open a new tab") == sites.TabPlan("new")
+    assert p("can you open another tab please") == sites.TabPlan("new")
+    assert p("open a new tab and go to Reddit") == sites.TabPlan("new", SitePlan("https://www.reddit.com/", "Reddit"))
+    assert p("close this tab") == sites.TabPlan("close")
+    assert p("Close the tab.") == sites.TabPlan("close")
+    assert p("close tab") == sites.TabPlan("close")
+    assert p("open a new tab and post on X") == goals.Unsupported(sites.REFUSE)
+
+
+def test_new_tab_keeps_the_old_one_and_close_goes_back():
+    asyncio.run(runner.run_task("go to Instagram"))
+    insta = runner.store.current
+    out = asyncio.run(runner.run_task("open a new tab and go to reddit"))
+    assert out["say"].startswith("Reddit is open")
+    reddit = runner.store.current
+    assert not insta.browser.closed and reddit is not insta
+    out = asyncio.run(runner.run_task("close this tab"))
+    assert out["say"].startswith("Closed the tab.")
+    assert reddit.browser.closed and runner.store.current is insta
+    assert asyncio.run(runner.run_task("close this tab"))["say"] == "Closed the tab."
+    assert insta.browser.closed and runner.store.current is None
+    assert asyncio.run(runner.run_task("close this tab"))["say"] == "There's no tab of mine open to close."
+
+
+def test_open_blank_new_tab():
+    out = asyncio.run(runner.run_task("open a new tab"))
+    assert out["say"] == sites.new_tab_say()
+    assert runner.store.current.browser.url == sites.NEW_TAB_URL

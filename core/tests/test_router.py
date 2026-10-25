@@ -51,7 +51,8 @@ def test_youtube_goes_to_browser():
 
 
 SITES = ["go to Instagram", "open X", "Can you open Twitter please", "go to nytimes.com", "take me to reddit.",
-         "open the Exploratorium website", "go to calhacks dot io", "open hacker news"]
+         "open the Exploratorium website", "go to calhacks dot io", "open hacker news", "open a new tab",
+         "close this tab", "close the tab please", "open a new tab and go to reddit"]
 NOT_SITES = ["go to the kitchen", "open the door", "take me to the bathroom"]
 
 

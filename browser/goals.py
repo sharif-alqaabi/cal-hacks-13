@@ -12,7 +12,7 @@ import config
 import llm
 import sites
 import youtube
-from sites import SitePlan
+from sites import SitePlan, TabPlan
 from youtube import YouTubePlan
 
 log = logging.getLogger("browser.goals")
@@ -102,12 +102,12 @@ def _youtube(goal: str) -> YouTubePlan | Unsupported | None:
     return Unsupported(yt) if isinstance(yt, str) else yt
 
 
-def _site(goal: str) -> SitePlan | Unsupported | None:
+def _site(goal: str) -> SitePlan | TabPlan | Unsupported | None:
     site = sites.parse(goal)
     return Unsupported(site) if isinstance(site, str) else site
 
 
-Plan = EmailPlan | LookupPlan | YouTubePlan | SitePlan | Unsupported
+Plan = EmailPlan | LookupPlan | YouTubePlan | SitePlan | TabPlan | Unsupported
 
 
 def parse_regex(goal: str) -> Plan:

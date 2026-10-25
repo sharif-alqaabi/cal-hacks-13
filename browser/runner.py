@@ -63,12 +63,28 @@ class Task:
 
 
 class Store:
-    """One Chrome tab at a time: the newest agent replaces (and closes) the previous one."""
+    """One working Chrome tab: the newest agent replaces (and closes) the previous one,
+    except after "open a new tab", which keeps the old tab open behind it until "close this tab"."""
 
     def __init__(self) -> None:
         self.lock = threading.Lock()
         self.pending: dict[str, Task] = {}
         self.current = None
+        self.kept: list = []   # older tabs left open by "open a new tab", newest last
+
+    def keep_current(self) -> None:
+        with self.lock:
+            if self.current is not None:
+                self.kept.append(self.current)
+            self.current = None
+            self.pending.clear()
+
+    def close_tab(self):
+        """Runs on the browser thread. Closes the working tab and returns to the one behind it (or None)."""
+        self.close_current()
+        with self.lock:
+            self.current = self.kept.pop() if self.kept else None
+        return self.current
 
     def adopt(self, agent) -> None:
         with self.lock:
@@ -329,6 +345,26 @@ def site_open(task_id: str, plan: sites.SitePlan) -> dict:
     return page
 
 
+def tab_run(task_id: str, plan: sites.TabPlan) -> str:
+    if plan.action == "close":
+        if store.current is None and not store.kept:
+            raise Failed("There's no tab of mine open to close.")
+        tracelog.emit(task_id, "act", "close the tab")
+        back = store.close_tab()
+        if back is None:
+            return "Closed the tab."
+        agents.activate(back.browser)
+        page = sites.read(back.browser, fallback=back.state.get("page"))
+        title = sites.title_of(page)
+        return f"Closed the tab. You're back on {title}." if title else "Closed the tab."
+    store.keep_current()
+    if plan.site:
+        return None   # run_task opens the site in the new tab
+    tracelog.emit(task_id, "act", "open a new tab")
+    _start(task_id, sites.NEW_TAB_URL, "Open a new tab. Never post, buy or delete anything.", "a new tab")
+    return sites.new_tab_say()
+
+
 def send_and_verify(task: Task) -> str:
     b, name = task.agent.browser, task.plan.to_name
     try:
@@ -392,7 +428,15 @@ async def run_task(goal: str) -> dict:
             say = await _in_browser(youtube_run, task_id, plan, timeout=deadline - time.monotonic() + 4)
             tracelog.emit(task_id, "answer", say, ms=int((time.monotonic() - t0) * 1000))
             return _reply(task_id, say)
-        await _in_browser(store.close_current, timeout=5)
+        if isinstance(plan, goals.TabPlan):
+            tracelog.emit(task_id, "plan", f"Tab {plan.action}" + (f": {plan.site.name}" if plan.site else ""))
+            say = await _in_browser(tab_run, task_id, plan, timeout=deadline - time.monotonic() + 4)
+            if say is not None:
+                tracelog.emit(task_id, "answer", say, ms=int((time.monotonic() - t0) * 1000))
+                return _reply(task_id, say)
+            plan = plan.site   # "open a new tab and go to Reddit": the old tab is kept, open the site in a new one
+        else:
+            await _in_browser(store.close_current, timeout=5)
         if isinstance(plan, goals.SitePlan):
             tracelog.emit(task_id, "plan", f"Open {plan.name}: {plan.url or 'first Google result'}")
             page = await _in_browser(site_open, task_id, plan, timeout=deadline - time.monotonic() + 4)
@@ -432,6 +476,7 @@ async def run_task(goal: str) -> dict:
         say = ("I ran out of time on Gmail. Nothing was sent." if email
                else "I ran out of time on YouTube." if isinstance(plan, goals.YouTubePlan)
                else f"I ran out of time opening {plan.name}." if isinstance(plan, goals.SitePlan)
+               else "I ran out of time with the tabs." if isinstance(plan, goals.TabPlan)
                else "I ran out of time looking that up.")
         tracelog.emit(task_id, "fail", say)
         return _reply(task_id, say)
