@@ -56,7 +56,7 @@ final class RelayModel {
 
   init() {
     let defaults = UserDefaults.standard
-    coreURL = defaults.string(forKey: "coreURL") ?? "ws://192.168.1.10:8000/stream"
+    coreURL = defaults.string(forKey: "coreURL") ?? "wss://dares-dominion-kerchief.ngrok-free.dev/stream"
     sourceKind = defaults.string(forKey: "sourceKind").flatMap(SourceKind.init(rawValue:)) ?? .glasses
     // Off by default: on glasses firmware 129 a stream with audio fails within seconds
     // (meta-wearables-dat-ios #356). Turn it on in Settings to try newer firmware.
