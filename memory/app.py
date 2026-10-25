@@ -27,6 +27,7 @@ class IngestReq(BaseModel):      # POST /ingest -> 202
 
 class RecallReq(BaseModel):      # POST /recall
     question: str
+    jpeg_b64: Optional[str] = None  # live frame for present-tense "who is this" face match
 
 
 class RecallResp(BaseModel):
@@ -89,7 +90,7 @@ async def ingest(req: IngestReq):
 async def recall(req: RecallReq):
     show("/recall", req)
     try:
-        return RecallResp(**await svc().recall(req.question))
+        return RecallResp(**await svc().recall(req.question, req.jpeg_b64))
     except Exception:
         log.exception("recall failed")
         raise HTTPException(503, "recall failed")  # core turns this into "Memory isn't available right now"

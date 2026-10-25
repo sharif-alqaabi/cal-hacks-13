@@ -23,7 +23,7 @@ A reply may arrive as **two consecutive non-urgent `say` messages** (one per sen
 | Endpoint | Request | Response |
 |---|---|---|
 | POST /ingest | `{ts, jpeg_b64}` | 202 |
-| POST /recall | `{question}` | `{answer, ts, thumb_url}` |
+| POST /recall | `{question, jpeg_b64?}` | `{answer, ts, thumb_url}` |
 | POST /remember | `{label, ts, jpeg_b64}` | `{ok}` |
 | POST /alert | `{kind: "lost"\|"help", note}` | `{ok}` |
 | GET /health | | 200 |

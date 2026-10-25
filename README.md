@@ -120,7 +120,11 @@ Alerts are announced by screen readers.
 
 ### Privacy
 
-Memory keeps captions and small thumbnails only, never video or audio. People are named only after the wearer introduces them, and faces are never described. Everything can be deleted from the dashboard, and the demo data is wiped after the event.
+Memory keeps captions and small thumbnails only, never video or audio. People are named only after the wearer introduces them, and faces are never described.
+
+**Faces.** When the wearer introduces someone ("this is my brother Sam", or "the guy at the cafe was Kevin"), memory saves that person's clearest face as a numeric signature and a small crop in `memory/faces/`. Later frames are compared to those signatures by two small OpenCV models (YuNet finds faces, SFace compares them) running on the laptop, so a friend is named on sight whatever they wear. Claude never identifies anyone from a face, and nothing about faces goes to Claude, SpacetimeDB or any server. Strangers are never enrolled or identified. "Forget everything" on the dashboard also deletes the saved faces.
+
+Everything else can be deleted from the dashboard, and the demo data is wiped after the event.
 
 ### Tests
 

@@ -23,7 +23,7 @@ cd memory
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
-Set up .env from the .env.example
+Set up .env from the .env.example. The first time memory starts it downloads two small face models (about 38 MB, from the OpenCV model zoo on GitHub) into `memory/models/`; until they arrive, faces are simply not recognised.
 
 **Browser agent** (email and lookups)
 ```bash

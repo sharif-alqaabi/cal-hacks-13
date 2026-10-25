@@ -4,4 +4,6 @@ anthropic
 fastapi
 uvicorn
 pillow>=10.1
+opencv-python-headless
+numpy
 websockets

@@ -42,6 +42,18 @@ FIXED_PHRASES = [WORKING, REMEMBERED, NOT_REMEMBERED, FAMILY_TOLD, FAMILY_DOWN, 
 
 
 FRAME_INTENTS = {"describe", "signal", "task"}   # handlers that send a fresh snap to a model
+_FACE_PAST = re.compile(r"\b(?:was|were|did|didn'?t|earlier|ago|yesterday|last|met|wearing|wore)\b", re.I)
+_FACE_NOW = re.compile(
+    r"\bwho\s*(?:is|'?s)\s+(?:this|that|he|she|they|him|her)\b|"
+    r"\bwho am i looking at\b|"
+    r"\brecogni[sz]e\s+(?:him|her|them|this(?:\s+(?:face|person))?)\b",
+    re.I,
+)
+
+
+def face_now_question(text: str) -> bool:
+    q = text.lower().replace("’", "'")
+    return bool(_FACE_NOW.search(q)) and not _FACE_PAST.search(q)
 
 
 class Verbatim(str):
@@ -342,7 +354,7 @@ class Session:
         await mirror.emit("transcript", text=text)
         # The keyword guess is instant: if it says the turn will look at the scene, ask the phone for the
         # full-res frame now so its round trip overlaps routing instead of following it.
-        if router.keyword_route(text) in FRAME_INTENTS:
+        if router.keyword_route(text) in FRAME_INTENTS or face_now_question(text):
             turn.frame_task = self.spawn(self.fresh_frame())
         try:
             intent, source, route_ms = await router.route(text, pending_confirm=self.pending_task_id is not None)
@@ -405,8 +417,14 @@ class Session:
             return VISION_DOWN
 
     async def do_recall(self, text: str, turn: Turn) -> Reply:
+        jpeg_b64 = None
+        if face_now_question(text):
+            f = await self.turn_frame(turn)
+            if f is None:
+                return NO_FRAME
+            jpeg_b64 = f.jpeg_b64
         try:
-            r = await memory.recall(text)
+            r = await memory.recall(text, jpeg_b64=jpeg_b64)
         except Exception as e:
             log.error("recall failed: %r", e)
             return memory.UNAVAILABLE

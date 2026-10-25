@@ -11,6 +11,7 @@ class IngestReq(BaseModel):      # POST /ingest -> 202
 
 class RecallReq(BaseModel):      # POST /recall
     question: str
+    jpeg_b64: Optional[str] = None  # live frame for present-tense "who is this" face match
 
 
 class RecallResp(BaseModel):

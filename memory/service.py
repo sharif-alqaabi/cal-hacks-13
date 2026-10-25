@@ -16,6 +16,7 @@ from pathlib import Path
 from PIL import Image
 
 import captions
+from faces import Faces
 from moss_index import MossIndex, known, parse_ref, to_docs
 from stdb import Stdb
 
@@ -46,12 +47,37 @@ JUST = re.compile(r"\b(?:just|a (?:moment|minute|second) ago|right now)\b", re.I
 FOLLOW = re.compile(r"^(?:and|also|so|what about|how about|what else|who else)\b|"
                     r"\b(?:it|its|them|they|those|that|there|then|he|him|his|she|her)\b", re.I)
 FOLLOW_S = 90
+# Present-tense "who is this": match the live frame core sends, not a saved recall photo.
+FACE_PAST = re.compile(r"\b(?:was|were|did|didn'?t|earlier|ago|yesterday|last|met|wearing|wore)\b", re.I)
+FACE_NOW = re.compile(
+    r"\bwho\s*(?:is|'?s)\s+(?:this|that|he|she|they|him|her)\b|"
+    r"\bwho am i looking at\b|"
+    r"\brecogni[sz]e\s+(?:him|her|them|this(?:\s+(?:face|person))?)\b",
+    re.I,
+)
 
 LEAVE = re.compile(r"\bwhen did i (?:leave|left|exit|go out of|head out of|get out of)\b", re.I)
 ARRIVE = re.compile(r"\bwhen did i (?:arrive|reach|get (?:home|back|to)|come (?:home|back|in)|walk in)\b", re.I)
 PLACE_WORDS = {"home": "home", "house": "home", "apartment": "home", "office": "office", "work": "office",
                "store": "store", "shop": "store"}
 PLACE_NAME = {"home": "home", "office": "the office", "store": "the store"}
+
+
+def face_now_question(question: str) -> bool:
+    """True when the wearer wants to know who is in view now, not who they saw earlier."""
+    q = question.lower().replace("’", "'")
+    return bool(FACE_NOW.search(q)) and not FACE_PAST.search(q)
+
+
+def face_answer(seen: list[tuple[str, float, str]]) -> str:
+    """Spoken answer from faces.match hits as (name, score, position)."""
+    if not seen:
+        return "I don't recognize anyone in front of you."
+    if len(seen) == 1:
+        name, _score, pos = seen[0]
+        return f"That's {name}, {pos}."
+    parts = [f"{name} {pos}" for name, _s, pos in seen]
+    return "I see " + ", ".join(parts) + "."
 
 
 # ---- frames -----------------------------------------------------------------
@@ -256,6 +282,7 @@ class Service:
         self.last: dict | None = None        # the previous recall: ts (ms), question, answer, moment
         self.last_hash: bytes | None = None  # thumbnail of the last frame kept, for duplicate skipping
         self.last_place: tuple[float, str, str] = (0.0, "other", "")  # (ts, place, place_detail) of the newest captioned frame
+        self.faces = Faces(Path(__file__).resolve().parent / "faces", Path(__file__).resolve().parent / "models")
         self.tasks: list[asyncio.Task] = []
         self.bg: set[asyncio.Task] = set()
 
@@ -270,6 +297,7 @@ class Service:
         # queue backed up (17 s to drain after a 10 s walk) and dropped frames, which could be the keys frame.
         self.tasks = [asyncio.create_task(self._worker()) for _ in range(WORKERS)]
         self.tasks.append(asyncio.create_task(self._prune_loop()))
+        self.tasks.append(asyncio.create_task(asyncio.to_thread(self.faces.load)))  # downloads the face models the first time
         log.info("started: %d moments, %d people, test scenes %s", len(rows), len(self.people), TEST_SCENES)
 
     async def close(self) -> None:
@@ -307,7 +335,11 @@ class Service:
 
     async def _caption(self, ts: float, jpeg_b64: str) -> None:
         scene = scene_of(jpeg_b64)
-        cap = await captions.caption(None if scene is not None else jpeg_b64, scene, self._known_people())
+        seen = await self._faces_in(jpeg_b64) if scene is None else []
+        cap = await captions.caption(None if scene is not None else jpeg_b64, scene, self._known_people(),
+                                     ", ".join(f"{n} {pos}" for n, _s, pos in seen))
+        if len(seen) == 1 and len(cap["people"]) == 1 and not known(cap["people"][0].get("name")):
+            cap["people"][0]["name"] = seen[0][0]  # Claude never names from a face: the local match does
         last_ts, last, last_detail = self.last_place
         if cap["place"] == "other" and last != "other" and 0 <= ts - last_ts <= STICKY_S:
             cap["place"] = last
@@ -343,6 +375,7 @@ class Service:
                 self._set_person(name, clothing or "unknown", mid),
                 self._store({"id": mid, "ts": mid, "caption_json": json.dumps(cap),
                              "thumb_url": self._thumb(mid, jpeg_b64), "place_note": r["place"]}))
+            await self._enroll(name, base64.b64decode(jpeg_b64) if scene is None else b"")
             return True
         else:
             f = r["fact"]
@@ -379,12 +412,20 @@ class Service:
             self._set_person(name, clothing or "unknown", src["ts"]),
             self._store({"id": mid, "ts": mid, "caption_json": json.dumps(cap), "thumb_url": src["thumb_url"],
                          "place_note": src["place_note"]}))
+        photo = THUMB_DIR / f"{src['id']}.jpg"  # the saved picture of that earlier moment, if it's still there
+        await self._enroll(name, photo.read_bytes() if photo.exists() else b"")
         return True
 
     # -- recall ---------------------------------------------------------------
 
-    async def recall(self, question: str) -> dict:
+    async def recall(self, question: str, jpeg_b64: str | None = None) -> dict:
         now_ms = int(time.time() * 1000)
+        if jpeg_b64 and face_now_question(question):
+            seen = await self._faces_in(jpeg_b64)
+            answer = face_answer(seen)
+            self.last = {"ts": now_ms, "question": question, "answer": answer, "moment": None, "anchor": question}
+            self._bg(self.db.call("add_recall", now_ms, question, answer, ""))
+            return {"answer": answer, "ts": None, "thumb_url": None}
         best = None
         hit = timeline_answer(question, self.moments)
         follow = bool(self.last and now_ms - self.last["ts"] <= FOLLOW_S * 1000 and FOLLOW.search(question))
@@ -489,7 +530,11 @@ class Service:
     async def _prune(self) -> None:
         """Forget moments deleted from the dashboard: SpacetimeDB is the source of truth."""
         before = list(self.moments)  # a moment added while the query runs isn't in `alive` yet, so don't judge it
+        people_before = set(self.people)
         alive = {r["id"] for r in await self.db.sql("SELECT id FROM moment")}
+        for name in people_before - {r["name"] for r in await self.db.sql("SELECT name FROM person")}:
+            self.people.pop(name, None)  # "Forget everything" on the dashboard: forget their faces too
+            self.faces.forget(name)
         dead = [m for m in before if m["id"] not in alive]
         if dead:
             gone = {m["id"] for m in dead}
@@ -525,8 +570,27 @@ class Service:
         await self.index.delete(self.moments)
         self.moments, self.people, self.ids, self.last_hash = [], {}, set(), None
         self.last_place = (0.0, "other", "")
+        self.faces.forget_all()
 
     # -- helpers --------------------------------------------------------------
+
+    async def _faces_in(self, jpeg_b64: str) -> list[tuple[str, float, str]]:
+        """Introduced people recognised by face in this frame, [] while the models load or if none is enrolled."""
+        if not self.faces.ready or not self.faces.enrolled:
+            return []
+        try:
+            return await asyncio.to_thread(self.faces.match, base64.b64decode(jpeg_b64))
+        except Exception as e:
+            log.warning("face match failed: %r", e)
+            return []
+
+    async def _enroll(self, name: str, jpeg: bytes) -> None:
+        """Save this person's clearest face from the picture they were introduced in. A missing face is not an error."""
+        if jpeg and self.faces.ready:
+            try:
+                await asyncio.to_thread(self.faces.enroll, name, jpeg)
+            except Exception as e:
+                log.warning("face enroll failed for %s: %r", name, e)
 
     def _known_people(self) -> str:
         return "; ".join(f"{p['name']}: {p['clothing_note']}" for p in self.people.values())

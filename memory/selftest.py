@@ -14,6 +14,7 @@ sys.path[:0] = [str(HERE), str(HERE / "mock")]
 os.environ["MEMORY_TEST_SCENES"] = "1"  # before importing service, which reads it once
 
 import captions  # noqa: E402
+import faces  # noqa: E402
 import drive  # noqa: E402
 import moss_index  # noqa: E402
 import service  # noqa: E402
@@ -219,6 +220,47 @@ def test_pick() -> None:
     assert m is keyboard and named == [], "no word match: still the best hit, but not template-eligible"
     sam = moment(NOON, CAP)
     assert service.pick("what was Sam wearing", [(Hit(id=f"{sam['id']}:p0", score=0.8), sam)])[2], "people match by name"
+
+
+def face_row(x, y, w, h, nose=0.5, score=0.9):
+    """A YuNet row: box, right eye, left eye, nose, mouth corners (x, y each), score. nose 0.5 is facing the camera."""
+    return [x, y, w, h, x + .3 * w, y + .35 * h, x + .7 * w, y + .35 * h, x + nose * w, y + .55 * h,
+            x + .35 * w, y + .75 * h, x + .65 * w, y + .75 * h, score]
+
+
+def test_faces() -> None:
+    import numpy as np
+    front, profile = face_row(100, 50, 120, 150), face_row(100, 50, 120, 150, nose=0.85)
+    big_cut = face_row(-60, 20, 300, 360)  # bigger, but off the left edge
+    small = face_row(300, 80, 60, 75)
+    assert faces.quality(front, 640) > faces.quality(profile, 640), "facing the camera beats a profile"
+    assert faces.quality(front, 640) > faces.quality(big_cut, 640), "a face cut off by the frame is a poor view"
+    assert faces.best_face([small, profile, front], 640) is front and faces.best_face([], 640) is None
+    assert [faces.where(r, 640) for r in (face_row(20, 0, 100, 100), face_row(270, 0, 100, 100), face_row(500, 0, 100, 100))] == \
+        ["on the left", "ahead", "on the right"]
+    a, b = np.array([1.0, 0, 0]), np.array([0.0, 1, 0])
+    assert faces.cosine(a, a) == 1.0 and faces.cosine(a, b) == 0.0 and faces.cosine(a, np.zeros(3)) == 0.0
+    enrolled = {"Sam": [a], "Kevin": [b, np.array([0.7, 0.7, 0])]}
+    assert faces.best_name(np.array([0.9, 0.1, 0]), enrolled)[0] == "Sam"
+    assert faces.best_name(np.array([0.0, 0.0, 1]), enrolled) is None, "nobody is like this face: no name"
+    assert faces.best_name(a, {}) is None and faces.best_name(a, {"Empty": []}) is None
+    assert faces.file_stem("Sam") != faces.file_stem("sam!") and faces.file_stem("Mary-Ann") != faces.file_stem("Mary Ann")
+    assert re.fullmatch(r"[a-z0-9-]+", faces.file_stem("O'Neil / ../x")), "no path characters in a file name"
+    off = faces.Faces(HERE / "no-such-faces", HERE / "no-such-models")  # models never loaded: recognise nothing, don't crash
+    assert not off.ready and off.match(b"x") == [] and off.enroll("Sam", b"x") is False
+    off.forget("Sam"), off.forget_all()
+
+
+def test_face_now() -> None:
+    for q in ("who is this", "who's that", "who am I looking at", "recognize this face", "recognize him"):
+        assert service.face_now_question(q), q
+    for q in ("where is my wallet", "who did I meet", "what was Sam wearing", "who was that guy",
+              "when did I last see them"):
+        assert not service.face_now_question(q), q
+    assert service.face_answer([]) == "I don't recognize anyone in front of you."
+    assert service.face_answer([("Kevin", 0.9, "ahead")]) == "That's Kevin, ahead."
+    assert service.face_answer([("Sam", 0.8, "on the left"), ("Kevin", 0.85, "ahead")]) == \
+        "I see Sam on the left, Kevin ahead."
 
 
 if __name__ == "__main__":

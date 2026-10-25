@@ -42,7 +42,9 @@ Rules:
 - Write "unknown" for any detail you can't see clearly. Never guess a color in poor light or a
   size you can't judge.
 - Name a person only if they clearly match someone in the known-people list sent with the
-  frame. Otherwise leave name empty and describe their clothing. Never describe faces.
+  frame, or the frame comes with a face recognition result naming someone at that position
+  (trust it; you can't identify anyone from a face yourself). Otherwise leave name empty and
+  describe their clothing. Never describe faces.
 - For documents, cards and screens, say what kind of thing it is ("a passport") but never copy
   ID, card or account numbers, passwords or addresses.
 - place is one of: home, outside, office, store, transit, other. place_detail is the room or
@@ -178,11 +180,12 @@ async def _structured(system: str, schema: dict, content: list) -> dict:
     return json.loads(next(b.text for b in resp.content if b.type == "text"))
 
 
-async def caption(jpeg_b64: str | None = None, scene: str | None = None, known_people: str = "") -> dict:
+async def caption(jpeg_b64: str | None = None, scene: str | None = None, known_people: str = "", recognized: str = "") -> dict:
     """Frame -> caption dict matching CAPTION_SCHEMA. known_people is e.g. "Sam: red hoodie, jeans"."""
     return await _structured(CAPTION_PROMPT, CAPTION_SCHEMA, [
         _frame_block(jpeg_b64, scene),
-        {"type": "text", "text": f"Known people: {known_people or 'none'}"},
+        {"type": "text", "text": f"Known people: {known_people or 'none'}"
+                                 + (f"\nRecognized by face in this frame: {recognized}" if recognized else "")},
     ])
 
 

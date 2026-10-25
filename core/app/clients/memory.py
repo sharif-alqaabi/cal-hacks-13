@@ -24,9 +24,9 @@ async def ingest(ts: float, jpeg_b64: str) -> None:
         await c.post("/ingest", json=IngestReq(ts=ts, jpeg_b64=jpeg_b64).model_dump())
 
 
-async def recall(question: str) -> RecallResp:
+async def recall(question: str, jpeg_b64: str | None = None) -> RecallResp:
     async with _client() as c:
-        r = await c.post("/recall", json=RecallReq(question=question).model_dump())
+        r = await c.post("/recall", json=RecallReq(question=question, jpeg_b64=jpeg_b64).model_dump())
         r.raise_for_status()
         return RecallResp.model_validate(r.json())
 

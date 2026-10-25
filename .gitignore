@@ -12,3 +12,5 @@ phone/fixtures/*
 browser/logs/
 browser/traces/
 .pytest_cache/
+memory/faces/
+memory/models/
