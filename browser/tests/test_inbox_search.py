@@ -37,6 +37,12 @@ def test_other_goals_unchanged():
     assert isinstance(p("email Sam that I'm running late"), goals.EmailPlan)
     assert p("open the first one") == goals.YouTubePlan("pick", pick=1)
     assert p("open the second result") == goals.YouTubePlan("pick", pick=2)
+    for text in ["click on second result", "click the second link", "open the second website", "go to the second one",
+                 "click on the second one", "open result number two", "take me to the second site", "click two",
+                 "open up the second search result please"]:
+        assert p(text) == goals.YouTubePlan("pick", pick=2), text
+    assert p("read the second one") == InboxPlan("read", pick=2)
+    assert isinstance(p("go to the Exploratorium website"), goals.SitePlan)
     assert p("when does Ace Hardware close") == goals.LookupPlan("when does Ace Hardware close")
     assert p("search for best tacos in SF") == goals.LookupPlan("best tacos in SF", listing=True)
     assert p("google best tacos in SF") == goals.LookupPlan("best tacos in SF", listing=True)

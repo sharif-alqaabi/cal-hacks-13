@@ -28,8 +28,12 @@ ORDINALS = {"one": 1, "1": 1, "first": 1, "top": 1, "two": 2, "2": 2, "second": 
 PAUSE_RX = re.compile(LEAD + r"(?:pause|stop)(?: (?:it|that|the video|the music|youtube|playing|the youtube video))?" + TAIL, re.I)
 RESUME_RX = re.compile(LEAD + r"(?:resume|unpause|keep playing|continue(?: playing| the video)?|play|play it|"
                        r"start it again|keep going)(?: (?:it|the video|again))?" + TAIL, re.I)
-PICK_RX = re.compile(LEAD + r"(?:play|pick|choose|open|watch|go with)?\s*(?:the\s+)?(?:number\s+)?"
-                     r"(?P<n>one|two|three|1|2|3|first|second|third|top|last)(?:\s+(?:one|video|result|link))?" + TAIL, re.I)
+PICK_VERB = (r"(?:play|pick|choose|open(?: up)?|watch|go with|click(?: on)?|tap(?: on)?|press|select|go to|go into|"
+             r"take me to|pull up|show me)?\s*")
+PICK_NOUN = r"(?:one|video|result|search result|link|website|web ?site|site|page|article|option)"
+N = r"(?P<n>one|two|three|1|2|3|first|second|third|top|last)"
+PICK_RX = re.compile(LEAD + PICK_VERB + r"(?:the\s+)?(?:number\s+)?" + N + rf"(?:\s+{PICK_NOUN})?" + TAIL
+                     + "|" + LEAD + PICK_VERB + rf"(?:the\s+)?{PICK_NOUN}\s+(?:number\s+)?" + N.replace("?P<n>", "?P<n2>") + TAIL, re.I)
 LATEST_RX = re.compile(LEAD + r"(?:play|put on|show me|watch|find)?\s*(?:me\s+)?(?:the\s+)?(?:latest|newest|most recent|new)\s+"
                        r"(?:youtube\s+)?(?:video|upload|episode)\s+(?:from|by|on)\s+(?P<ch>.+?)(?:'s)?(?:\s+channel)?" + TAIL, re.I)
 SEARCH_RX = re.compile(LEAD + r"(?:find|search(?: youtube)?(?: for)?|look up|look for|show me|get me|what are)\s+"
@@ -72,7 +76,7 @@ def parse(goal: str) -> YouTubePlan | str | None:
     if RESUME_RX.match(text):
         return YouTubePlan("resume")
     if m := PICK_RX.match(text):
-        return YouTubePlan("pick", pick=ORDINALS[m.group("n").lower()])
+        return YouTubePlan("pick", pick=ORDINALS[(m.group("n") or m.group("n2")).lower()])
     if m := LATEST_RX.match(text):
         return YouTubePlan("latest", query=m.group("ch").strip())
     if m := (SEARCH_RX.match(text) or SEARCH_YT_RX.match(text)):
