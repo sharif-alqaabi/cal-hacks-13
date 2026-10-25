@@ -44,7 +44,8 @@ def test_refuses_engagement_and_money():
 
 def test_length_from_aria():
     assert youtube._length("Cold Brew", "Cold Brew 4 minutes, 21 seconds") == "4 minutes"
-    assert youtube._length("Q&A", "Q&A 1 hour, 2 minutes") == "1 hour, 2 minutes"
+    assert youtube._length("Q&A", "Q&A 1 hour, 2 minutes") == "1 hour"
+    assert youtube._length("Lofi", "Lofi 12 hours, 3 minutes, 9 seconds") == "12 hours"
     assert youtube._length("Short", "Short 45 seconds") == "45 seconds"
     assert youtube._length("Live", "Live") == ""
 
@@ -52,8 +53,16 @@ def test_length_from_aria():
 def test_results_say():
     vs = [Video("A | B", "Chan", "4 minutes", "u1"), Video("C", "D", "", "u2"), Video("E", "F", "1 hour", "u3")]
     say = youtube.results_say("cold brew", vs)
-    assert say == ("Top results for cold brew. One: A, B, by Chan, 4 minutes. Two: C, by D. "
-                   "Three: E, by F, 1 hour. Say play one, two or three.")
+    assert say == ("Top results for cold brew. One: A, 4 minutes. Two: C. "
+                   "Three: E, 1 hour. Say play one, two or three.")
+
+
+def test_short_titles():
+    assert youtube._short("The ULTIMATE Cold Brew Guide! (Easy, Cheap) | James Hoffmann") == "The ULTIMATE Cold Brew Guide"
+    assert youtube._short("lofi hip hop radio 📚 beats to relax/study to") == "lofi hip hop radio beats to"
+    assert youtube._short("How to make cold brew - Tutorial") == "How to make cold brew"
+    assert youtube._short("Lo-fi beats") == "Lo-fi beats"
+    assert youtube._short("(Official Video)") == "Official Video"
 
 
 def test_clean_drops_emoji():

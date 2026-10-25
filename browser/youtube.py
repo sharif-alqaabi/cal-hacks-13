@@ -145,8 +145,8 @@ def _length(title: str, aria: str) -> str:
     words = (m.group(0) if m else "").strip(" ,")
     if not words:
         return ""
-    # "4 minutes, 21 seconds" -> "4 minutes" (seconds don't help a listener choose); under a minute keep seconds
-    return re.sub(r",? ?\d+ seconds?$", "", words) if "minute" in words or "hour" in words else words
+    # keep only the largest unit: "1 hour, 2 minutes" -> "1 hour", "4 minutes, 21 seconds" -> "4 minutes"
+    return re.split(r",\s*", words)[0]
 
 
 def _video(raw: dict, channel: str = "") -> Video:
@@ -264,8 +264,18 @@ def _clean(title: str) -> str:
     return " ".join(re.sub(r"\s*\|\s*", ", ", title).split()).rstrip(".")
 
 
-def describe(v: Video, with_channel: bool = True) -> str:
-    out = _clean(v.title)
+TITLE_WORDS = 6
+
+
+def _short(title: str) -> str:
+    """One short spoken line: the title up to the first "!", "|", " - ", "(" or "[", at most six words."""
+    head = re.split(r"\s*(?:[!|(\[]|\s[-–—]\s)", title, maxsplit=1)[0]
+    words = _clean(head or re.sub(r"[()\[\]!|]", " ", title)).split()
+    return " ".join(words[:TITLE_WORDS]).rstrip(",:;.")
+
+
+def describe(v: Video, with_channel: bool = False) -> str:
+    out = _short(v.title)
     if with_channel and v.channel:
         out += f", by {v.channel}"
     if v.length:
@@ -284,8 +294,8 @@ def results_say(query: str, videos: list[Video]) -> str:
 
 def playing_say(v: Video, st: dict, latest: bool = False) -> str:
     if not st:
-        return f"I opened {_clean(v.title)}, but I couldn't start the video."
+        return f"I opened {_short(v.title)}, but I couldn't start the video."
     head = f"Playing the latest video from {v.channel}: " if latest and v.channel else "Playing "
-    body = describe(v, with_channel=not latest)
+    body = describe(v)
     tail = " An ad is playing first; I'll skip it when I can." if st.get("ad") else ""
     return f"{head}{body}.{tail} Say pause to stop it."
