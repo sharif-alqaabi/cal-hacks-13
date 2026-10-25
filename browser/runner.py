@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from functools import partial
 
 import agents
+import claude_agent
 import config
 import gmail
 import goals
@@ -519,6 +520,17 @@ def nav_run(task_id: str, plan: sites.NavPlan) -> str:
     return sites.nav_say(plan.action, page)
 
 
+def agent_run(task_id: str, goal: str, deadline: float) -> str:
+    """Fallback for anything no goal covers: Claude Haiku works in the open tab (or a fresh Google tab)."""
+    agent = store.current
+    if agent is None:
+        agent = _start(task_id, sites.NEW_TAB_URL, "Help with: " + goal + " Never send, post, buy or delete anything.",
+                       "Chrome")
+    else:
+        agents.activate(agent.browser)
+    return claude_agent.run(agent.browser, goal, task_id, deadline)
+
+
 def send_and_verify(task: Task) -> str:
     b, name = task.agent.browser, task.plan.to_name
     try:
@@ -574,6 +586,12 @@ async def run_task(goal: str) -> dict:
     plan = await goals.parse(goal)
     email = isinstance(plan, goals.EmailPlan)
     try:
+        if isinstance(plan, goals.Unsupported) and plan.say == goals.NOT_SUPPORTED and claude_agent.enabled():
+            tracelog.emit(task_id, "plan", f"No set flow: {config.AGENT_MODEL} works it out step by step")
+            end = min(time.monotonic() + config.AGENT_BUDGET_S, t0 + 37)   # core gives up on /task at 40 s
+            say = await _in_browser(agent_run, task_id, goal, end, timeout=end - time.monotonic() + 2)
+            tracelog.emit(task_id, "answer", say, ms=int((time.monotonic() - t0) * 1000))
+            return _reply(task_id, say)
         if isinstance(plan, goals.Unsupported):
             tracelog.emit(task_id, "fail", plan.say)
             return _reply(task_id, plan.say)

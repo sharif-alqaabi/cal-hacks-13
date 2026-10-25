@@ -13,7 +13,7 @@ def fake_env(monkeypatch, tmp_path):
     for name, value in {
         "FAKE": True, "ANTHROPIC_API_KEY": "", "TYPESAFE_API_KEY": "", "GMAIL_PREFILL": False,
         "VERIFY_CANCEL": False, "DEMO_CONTACTS": "Sam=sam.calhacks.demo@gmail.com", "UNDO_SEND_S": 0,
-        "SENT_POLL_S": 1, "TASK_BUDGET_S": 3, "LOG_DIR": tmp_path,
+        "SENT_POLL_S": 1, "TASK_BUDGET_S": 3, "LOG_DIR": tmp_path, "AGENT_FALLBACK": False,
     }.items():
         monkeypatch.setattr(config, name, value)
     monkeypatch.delenv("FAKE_SCRIPT", raising=False)

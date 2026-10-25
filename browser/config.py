@@ -32,4 +32,11 @@ CONFIRM_BUDGET_S = float(os.getenv("CONFIRM_BUDGET_S", "34"))
 LOOKUP_MAX_STEPS = int(os.getenv("LOOKUP_MAX_STEPS", "6"))
 TASK_TTL_S = float(os.getenv("TASK_TTL_S", "600"))
 
+# Fallback agent (claude_agent.py) for requests no goal covers: Claude Haiku drives the tab step by step
+AGENT_FALLBACK = os.getenv("AGENT_FALLBACK", "1").strip().lower() in {"1", "true", "yes", "on"}
+AGENT_MODEL = os.getenv("AGENT_MODEL", "claude-haiku-5-5")
+AGENT_MAX_STEPS = int(os.getenv("AGENT_MAX_STEPS", "15"))
+AGENT_BUDGET_S = float(os.getenv("AGENT_BUDGET_S", "30"))
+AGENT_MAX_TOKENS = int(os.getenv("AGENT_MAX_TOKENS", "400"))
+
 LOG_DIR = Path(os.getenv("BROWSER_LOG_DIR", str(HERE / "logs")))
