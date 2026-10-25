@@ -248,7 +248,8 @@ def template(moment: dict, kind: str, idx: int, now_ms: int) -> str | None:
         # Two short sentences: core speaks the first as soon as it is synthesised, so what and where come first.
         # shortcut: plural by a trailing "s" (keys, glasses, headphones), wrong for odd plurals; upgrade if one shows up.
         plural = name.lower().endswith("s") and not name.lower().endswith("ss")
-        detail = f" {"They're" if plural else "It's"} {color}." if color else ""
+        pronoun = "They're" if plural else "It's"
+        detail = f" {pronoun} {color}." if color else ""
         return f"I last saw the {name} {loc}, {when}.{detail}"  # "the", not "your": a frame doesn't say whose it is
     if kind == "p":
         p = c["people"][idx]
