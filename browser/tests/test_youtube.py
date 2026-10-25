@@ -46,6 +46,8 @@ def test_length_from_aria():
     assert youtube._length("Cold Brew", "Cold Brew 4 minutes, 21 seconds") == "4 minutes"
     assert youtube._length("Q&A", "Q&A 1 hour, 2 minutes") == "1 hour"
     assert youtube._length("Lofi", "Lofi 12 hours, 3 minutes, 9 seconds") == "12 hours"
+    assert youtube._length("Dog TV", "Dog TV 11 hours, 59 minutes") == "12 hours"
+    assert youtube._length("Brew", "Brew 1 minute, 45 seconds") == "2 minutes"
     assert youtube._length("Short", "Short 45 seconds") == "45 seconds"
     assert youtube._length("Live", "Live") == ""
 
@@ -59,7 +61,8 @@ def test_results_say():
 
 def test_short_titles():
     assert youtube._short("The ULTIMATE Cold Brew Guide! (Easy, Cheap) | James Hoffmann") == "The ULTIMATE Cold Brew Guide"
-    assert youtube._short("lofi hip hop radio 📚 beats to relax/study to") == "lofi hip hop radio beats to"
+    assert youtube._short("lofi hip hop radio 📚 beats to relax/study to") == "lofi hip hop radio beats"
+    assert youtube._short("DOG TV 12 Hours Videos for Dogs Home Alone") == "DOG TV 12 Hours Videos"
     assert youtube._short("How to make cold brew - Tutorial") == "How to make cold brew"
     assert youtube._short("Lo-fi beats") == "Lo-fi beats"
     assert youtube._short("(Official Video)") == "Official Video"

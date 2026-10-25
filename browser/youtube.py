@@ -145,8 +145,11 @@ def _length(title: str, aria: str) -> str:
     words = (m.group(0) if m else "").strip(" ,")
     if not words:
         return ""
-    # keep only the largest unit: "1 hour, 2 minutes" -> "1 hour", "4 minutes, 21 seconds" -> "4 minutes"
-    return re.split(r",\s*", words)[0]
+    # round to the largest unit: "11 hours, 59 minutes" -> "12 hours", "4 minutes, 21 seconds" -> "4 minutes"
+    parts = re.split(r",\s*", words)
+    n, unit = parts[0].split()
+    n = int(n) + (len(parts) > 1 and int(parts[1].split()[0]) >= 30)
+    return f"{n} {unit.rstrip('s')}{'s' if n != 1 else ''}"
 
 
 def _video(raw: dict, channel: str = "") -> Video:
@@ -265,13 +268,16 @@ def _clean(title: str) -> str:
 
 
 TITLE_WORDS = 6
+DANGLING = {"", "a", "an", "and", "at", "by", "for", "from", "in", "of", "on", "or", "the", "to", "with"}
 
 
 def _short(title: str) -> str:
     """One short spoken line: the title up to the first "!", "|", " - ", "(" or "[", at most six words."""
     head = re.split(r"\s*(?:[!|(\[]|\s[-–—]\s)", title, maxsplit=1)[0]
-    words = _clean(head or re.sub(r"[()\[\]!|]", " ", title)).split()
-    return " ".join(words[:TITLE_WORDS]).rstrip(",:;.")
+    words = _clean(head or re.sub(r"[()\[\]!|]", " ", title)).split()[:TITLE_WORDS]
+    while len(words) > 1 and words[-1].lower().strip(",:;.&") in DANGLING:
+        words.pop()
+    return " ".join(words).rstrip(",:;.&")
 
 
 def describe(v: Video, with_channel: bool = False) -> str:
