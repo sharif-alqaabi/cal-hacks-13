@@ -70,7 +70,7 @@ def svc() -> Service:
 
 def show(path: str, req: BaseModel) -> None:
     """One line per request: the JSON core sent, with the image reduced to its size."""
-    body = {k: (f"<{len(v)} base64 chars>" if k == "jpeg_b64" else v) for k, v in req.model_dump().items()}
+    body = {k: (f"<{len(v)} base64 chars>" if k == "jpeg_b64" and v is not None else v) for k, v in req.model_dump().items()}
     log.info("%s %s", path, body)
 
 
