@@ -42,6 +42,20 @@ def test_confirm_short_circuit_when_pending(fake):
     assert (intent, source) == ("confirm", "keywords")
 
 
+YOUTUBE = ["play the latest video from James Hoffmann on YouTube", "find videos about cold brew on YouTube",
+           "play number two", "play the second one", "pause", "resume", "pause the video", "search YouTube for lofi"]
+
+
+def test_youtube_goes_to_browser():
+    assert [t for t in YOUTUBE if keyword_route(t) != "browser"] == []
+
+
+def test_youtube_controls_short_circuit(fake):
+    for text in ["pause", "play number two", "play lofi music on YouTube"]:
+        intent, source, _ = asyncio.run(router.route(text))
+        assert (intent, source) == ("browser", "keywords"), text
+
+
 def test_jev_used_when_confident(fake):
     intent, source, ms = asyncio.run(router.route("where did I put my keys"))
     assert (intent, source) == ("recall", "jev") and ms >= 0

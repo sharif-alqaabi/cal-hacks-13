@@ -1,4 +1,4 @@
-"""Spoken request -> what to do: an email (to a known contact) or a web lookup.
+"""Spoken request -> what to do: an email (to a known contact), a web lookup or YouTube (youtube.py, rules only).
 
 Claude Sonnet parses first (better message wording); regex rules are the fallback when there's no key,
 the call fails or it takes more than 3 s. Recipients only come from DEMO_CONTACTS: the agent never guesses an address.
@@ -9,6 +9,8 @@ from dataclasses import dataclass
 
 import config
 import llm
+import youtube
+from youtube import YouTubePlan
 
 log = logging.getLogger("browser.goals")
 
@@ -31,7 +33,7 @@ class Unsupported:
     say: str
 
 
-NOT_SUPPORTED = "On the laptop I can send an email or look something up."
+NOT_SUPPORTED = "On the laptop I can send an email, look something up or play YouTube videos."
 NO_MONEY = "I can't buy or pay for things. I can send an email or look something up."
 
 MONEY_RX = re.compile(r"\b(buy|purchase|pay|order|checkout|check out|subscribe|donate|transfer money|venmo)\b", re.I)
@@ -92,8 +94,15 @@ def _email(name: str, message: str, subject: str = "") -> EmailPlan:
                      to_addr=resolve(name))
 
 
-def parse_regex(goal: str) -> EmailPlan | LookupPlan | Unsupported:
+def _youtube(goal: str) -> YouTubePlan | Unsupported | None:
+    yt = youtube.parse(goal)
+    return Unsupported(yt) if isinstance(yt, str) else yt
+
+
+def parse_regex(goal: str) -> EmailPlan | LookupPlan | YouTubePlan | Unsupported:
     text = goal.strip()
+    if yt := _youtube(text):
+        return yt
     if MONEY_RX.search(text):
         return Unsupported(NO_MONEY)
     for rx in EMAIL_RXS:
@@ -106,7 +115,9 @@ def parse_regex(goal: str) -> EmailPlan | LookupPlan | Unsupported:
     return Unsupported(NOT_SUPPORTED)
 
 
-async def parse(goal: str) -> EmailPlan | LookupPlan | Unsupported:
+async def parse(goal: str) -> EmailPlan | LookupPlan | YouTubePlan | Unsupported:
+    if yt := _youtube(goal):   # before Claude: deterministic and instant, and "pause" must not wait 3 s
+        return yt
     if MONEY_RX.search(goal):
         return Unsupported(NO_MONEY)
     if llm.available():
