@@ -468,7 +468,8 @@ class Session:
 
     async def do_other(self, text: str, turn: Turn) -> Reply:
         try:
-            return await asyncio.wait_for(vision.chat(text), config.CHAT_TIMEOUT_S)
+            return await asyncio.wait_for(vision.chat(text, self.latest.jpeg_b64 if self.latest else None),
+                                          config.CHAT_TIMEOUT_S)
         except Exception:
             return NOT_CAUGHT
 

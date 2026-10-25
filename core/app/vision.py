@@ -23,7 +23,10 @@ SIGNAL_SYSTEM = (
     'If digits are lit next to the hand, the signal is "countdown" with that number, not "dont_walk".'
 )
 
-CHAT_SYSTEM = "You are a helpful voice assistant for a blind person. Answer in at most two short spoken sentences."
+CHAT_SYSTEM = (
+    "You are a helpful voice assistant for a blind person. Answer in at most two short spoken sentences. "
+    "The image is what their camera glasses see right now: use it only if the question is about what is in view."
+)
 
 SIGNAL_SENTENCES = {
     "walk": "The walk sign is on.",
@@ -76,5 +79,5 @@ async def signal(jpeg_b64: str) -> list[str]:
     return compose_signal(raw)
 
 
-async def chat(text: str) -> str:
-    return await llm.ask(config.VISION_MODEL, CHAT_SYSTEM, text, max_tokens=120, timeout=config.CHAT_TIMEOUT_S)
+async def chat(text: str, jpeg_b64: str | None = None) -> str:
+    return await llm.ask(config.VISION_MODEL, CHAT_SYSTEM, text, jpeg_b64, max_tokens=120, timeout=config.CHAT_TIMEOUT_S)
