@@ -116,12 +116,19 @@ def test_time() -> None:
 def test_templates() -> None:
     m = moment(NOON - 20 * MIN, CAP)
     assert service.template(m, "o", 0, NOON) == \
-        "I last saw the keys on the wooden counter next to the kettle. Silver with a red fob, seen about 20 minutes ago."
-    assert service.template(m, "p", 0, NOON) == "Sam was wearing red hoodie. Seen about 20 minutes ago."
+        "I last saw the keys on the wooden counter next to the kettle, about 20 minutes ago. They're silver with a red fob."
+    wallet = {**CAP, "objects": [{**CAP["objects"][0], "name": "wallet", "color": "black"}]}
+    assert service.template(moment(NOON - 20 * MIN, wallet), "o", 0, NOON).endswith(" It's black.")
+    bare = {**CAP, "objects": [{**CAP["objects"][0], "color": "unknown"}]}
+    assert service.template(moment(NOON - 20 * MIN, bare), "o", 0, NOON).endswith("about 20 minutes ago.")  # no color: one sentence
+    assert service.template(m, "p", 0, NOON) == "When I last saw Sam, about 20 minutes ago, they were wearing red hoodie."
     assert service.template(m, "scene", 0, NOON) is None
     f = service.template(moment(NOON - 20 * MIN, FACT), "fact", 0, NOON)
-    assert f.startswith("You told me your passport is in the drawer, about 20 minutes ago."), f
-    assert "That's the top drawer of a dresser (dark brown, wood, left of the bed)." in f, f
+    assert f.startswith("Your passport is in the drawer."), f
+    assert "That's the top drawer of a dresser, dark brown, wood, left of the bed." in f, f
+    assert f.endswith("You mentioned it about 20 minutes ago."), f
+    for out in (service.template(m, "o", 0, NOON), service.template(m, "p", 0, NOON), f):
+        assert "told me" not in out.lower() and "(" not in out, out  # nothing false to say, nothing a voice would read as a bracket
     assert service.to_second_person("I put my wallet on the shelf") == "you put your wallet on the shelf"
     assert service.to_second_person("my keys are mine, I'm sure") == "your keys are yours, you're sure"
     thin = {**CAP, "place_detail": "", "objects": [{**CAP["objects"][0], "on_or_in": "unknown", "near": ""}]}

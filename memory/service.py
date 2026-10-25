@@ -220,12 +220,14 @@ def template(moment: dict, kind: str, idx: int, now_ms: int) -> str | None:
         if not name or not loc or known(o.get("text")):  # an object with readable text is a question about the text: Sonnet
             return None
         # Two short sentences: core speaks the first as soon as it is synthesised, so what and where come first.
-        detail = f"{color[0].upper()}{color[1:]}, seen {when}" if color else f"Seen {when}"
-        return f"I last saw the {name} {loc}. {detail}."  # "the", not "your": a frame doesn't say whose it is
+        # shortcut: plural by a trailing "s" (keys, glasses, headphones), wrong for odd plurals; upgrade if one shows up.
+        plural = name.lower().endswith("s") and not name.lower().endswith("ss")
+        detail = f" {"They're" if plural else "It's"} {color}." if color else ""
+        return f"I last saw the {name} {loc}, {when}.{detail}"  # "the", not "your": a frame doesn't say whose it is
     if kind == "p":
         p = c["people"][idx]
         name, clothing = known(p.get("name")), known(p.get("clothing"))
-        return f"{name} was wearing {clothing}. Seen {when}." if name and clothing else None
+        return f"When I last saw {name}, {when}, they were wearing {clothing}." if name and clothing else None
     if kind == "fact":
         f = c["fact"]
         statement = to_second_person(known(f.get("statement")))
@@ -234,8 +236,8 @@ def template(moment: dict, kind: str, idx: int, now_ms: int) -> str | None:
         loc = f.get("location") or {}
         name = known(loc.get("name"))
         extras = ", ".join(x for x in (known(loc.get("color")), known(loc.get("material")), known(loc.get("near"))) if x)
-        tail = f" That's the {name}{f' ({extras})' if extras else ''}." if name else ""
-        return f"You told me {statement}, {when}.{tail}"
+        tail = f" That's the {name}{f', {extras}' if extras else ''}." if name else ""
+        return f"{statement[0].upper()}{statement[1:].rstrip('.')}.{tail} You mentioned it {when}."
     return None
 
 
@@ -440,7 +442,7 @@ class Service:
             if path.exists():  # forgotten from the dashboard: the picture is gone too
                 c = json.loads(m["caption_json"])
                 shots.append((m, (when_phrase(m["ts"], now_ms), base64.b64encode(path.read_bytes()).decode(),
-                                  known(c.get("scene")) or known(c.get("said")))))
+                                  known(c.get("scene")))))  # not the spoken label: "this is Sam" would read as "you told me"
         return shots
 
     async def _ask(self, question: str, entries: list[str], shots) -> tuple[str, dict | None]:
@@ -467,14 +469,14 @@ class Service:
             docs = to_docs(m)
             if docs:
                 told = (docs[0].metadata or {}).get("kind") == "fact"
-                out.append(f"{'you told me' if told else 'seen'} {when_phrase(m['ts'], now_ms)}: "
+                out.append(f"{'the wearer asked you to remember,' if told else 'seen'} {when_phrase(m['ts'], now_ms)}: "
                            + " ".join(d.text for d in docs))
         return out
 
     @staticmethod
     def _entry(doc, moment: dict, now_ms: int) -> str:
         told = (doc.metadata or {}).get("kind") == "fact"
-        return f"{'you told me' if told else 'seen'} {when_phrase(moment['ts'], now_ms)}: {doc.text}"
+        return f"{'the wearer asked you to remember,' if told else 'seen'} {when_phrase(moment['ts'], now_ms)}: {doc.text}"
 
     async def _prune_loop(self) -> None:
         while True:

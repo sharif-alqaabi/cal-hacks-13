@@ -21,7 +21,7 @@ INDEX = "moments"
 def known(value) -> str:
     """A caption field, or "" when the model wrote nothing or "unknown"."""
     v = (value or "").strip()
-    return "" if v.lower() == "unknown" else v
+    return "" if v.lower() == "unknown" or v.lower().startswith("unknown ") else v  # "unknown surface" is no surface
 
 
 def _join(*parts, sep=", ") -> str:

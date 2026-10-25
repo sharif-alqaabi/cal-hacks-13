@@ -64,6 +64,8 @@ with TestClient(app) as c:
         answer = r.json()["answer"] if r.status_code == 200 else f"HTTP {r.status_code}"
         ok = (q["expect"].lower() in answer.lower()) if "expect" in q else bool(re.search(q["expect_regex"], answer))
         check(ok, f"{q['q']!r} ({ms:.0f} ms) -> {answer}")
+        # Only the passport was told to it ("remember that..."): nothing else may claim the wearer said it.
+        check("told me" not in answer.lower(), f"{q['q']!r} doesn't say 'you told me'")
 
     # A follow-up leans on the question before it: "them" has to mean the keys.
     c.post("/recall", json={"question": "where are my keys"})
