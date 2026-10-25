@@ -29,14 +29,25 @@ YOUTUBE_RX = re.compile(
     r"\byoutube\b|^(?:please |ok |okay )?(?:pause|resume|unpause|stop the video|"
     r"play (?:the )?(?:number )?(?:one|two|three|1|2|3|first|second|third|top|last)(?: one| video| result)?$)")
 
+# "go to Instagram", "open nytimes.com", "open the Exploratorium website": the browser opens the site. Only named
+# sites, domains or "... website" count, so "go to the kitchen" is left to the classifiers.
+SITES = (r"x|twitter|instagram|insta|facebook|reddit|linkedin|tiktok|threads|gmail|google(?: maps| calendar| docs| drive)?|"
+         r"wikipedia|amazon|netflix|spotify|github|hacker news|espn|cnn|bbc(?: news)?|(?:the )?new york times|ny ?times|"
+         r"weather\.com|chatgpt|claude|pinterest|twitch|yelp|ebay|craigslist|devpost|cal ?hacks")
+SITE_RX = re.compile(
+    r"^(?:hey |ok |okay )?(?:can you |could you |would you |please )*(?:go to|go on|open(?: up)?|pull up|bring up|"
+    r"take me to|navigate to|visit|load)\s+(?:the\s+)?"
+    rf"(?:(?:{SITES})(?:\s+(?:website|site|page|homepage))?|[\w-]+(?:\.| dot )[a-z]{{2,}}(?:/\S*)?|"
+    r"[\w' -]+?\s+(?:website|web site|homepage))(?:\s+(?:for me|please|on the laptop|in chrome))*$")
+
 JEV_CRITERIA = {
     "describe": "Wants to know what is around or in front of them",
     "signal": "Asks about a pedestrian signal, walk sign, traffic light or crosswalk",
     "recall": "Asks about something seen earlier, like where they left an object or what someone wore",
     "remember": "Introduces a person or asks to remember something",
     "lost": "Says they are lost, need help, or want their family told where they are",
-    "browser": "Wants a task done on the laptop or web, like sending an email, or YouTube: finding, playing, "
-               "picking (\"play number two\"), pausing or resuming a video",
+    "browser": "Wants a task done on the laptop or web, like sending an email, opening a website (\"go to Instagram\"), "
+               "or YouTube: finding, playing, picking (\"play number two\"), pausing or resuming a video",
     "confirm": "Answers yes or no to a pending draft",
     "task": "Work mode: checks whether a held item is the right one for an order",
     "other": "Anything else, small talk or a general question",
@@ -47,12 +58,14 @@ ROUTER_SYSTEM = (
     f"Reply with exactly one label from: {', '.join(INTENTS)}.\n"
     "describe=what's around/in front; signal=pedestrian signal/crosswalk; recall=asking about something seen earlier; "
     "remember=introducing a person or asking to remember something; lost=lost or needs help; "
-    "browser=email/web task on the laptop, including YouTube (find, play, pick a numbered result, pause, resume a video); confirm=yes/no answer to a pending draft; task=checking items in work mode; other=anything else."
+    "browser=email/web task on the laptop, including opening a website (go to Instagram, open nytimes.com) and YouTube (find, play, pick a numbered result, pause, resume a video); confirm=yes/no answer to a pending draft; task=checking items in work mode; other=anything else."
 )
 
 
 def keyword_route(text: str) -> str:
     t = text.lower().replace("’", "'").strip()
+    if SITE_RX.match(t.rstrip(".!?")):
+        return "browser"
     for intent, pat in KEYWORDS:
         if re.search(pat, t):
             return intent
@@ -112,7 +125,8 @@ async def route(text: str, pending_confirm: bool = False) -> tuple[str, str, int
     hint = keyword_route(text)
     if pending_confirm and hint == "confirm":
         return done("confirm", "keywords")
-    if YOUTUBE_RX.search(text.lower().replace("’", "'").strip().rstrip(".!?")):
+    said = text.lower().replace("’", "'").strip().rstrip(".!?")
+    if YOUTUBE_RX.search(said) or SITE_RX.match(said):
         return done("browser", "keywords")
     # Claude starts alongside Jev instead of after it, so an unsure Jev costs max(jev, claude), not the sum.
     claude = asyncio.create_task(claude_route(text)) if llm.available() else None

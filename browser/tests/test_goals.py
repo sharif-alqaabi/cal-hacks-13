@@ -49,7 +49,7 @@ def test_lookup_rules(text, query):
 @pytest.mark.parametrize("text,say", [
     ("buy me a coffee", goals.NO_MONEY),
     ("order a pizza", goals.NO_MONEY),
-    ("open spotify", goals.NOT_SUPPORTED),
+    ("turn up the volume", goals.NOT_SUPPORTED),
 ])
 def test_unsupported(text, say):
     p = goals.parse_regex(text)

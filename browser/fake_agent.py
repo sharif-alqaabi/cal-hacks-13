@@ -16,6 +16,7 @@ from urllib.parse import parse_qs, urlparse
 
 import gmail
 import guard
+import sites
 from agents import StalePage
 
 SENT: list[dict] = []        # every email the fake Gmail actually sent (shared across tabs, like a real mailbox)
@@ -122,6 +123,8 @@ class FakeBrowser:
             to = self.fields["to"]
             return {"emails": gmail.EMAIL_RX.findall(to), "names": [], "to_text": to,
                     "subject": self.fields["subject"], "body": self.fields["body"]}
+        if expression == sites.FIRST_RESULT_JS:
+            return "https://www.calhacks.io/" if self._kind() == "search" else None
         if expression == gmail.SENT_ROWS_JS:
             return self._sent_rows() if self._kind() == "sent" else []
         return None

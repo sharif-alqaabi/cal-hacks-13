@@ -50,6 +50,19 @@ def test_youtube_goes_to_browser():
     assert [t for t in YOUTUBE if keyword_route(t) != "browser"] == []
 
 
+SITES = ["go to Instagram", "open X", "Can you open Twitter please", "go to nytimes.com", "take me to reddit.",
+         "open the Exploratorium website", "go to calhacks dot io", "open hacker news"]
+NOT_SITES = ["go to the kitchen", "open the door", "take me to the bathroom"]
+
+
+def test_sites_go_to_browser(fake):
+    assert [t for t in SITES if keyword_route(t) != "browser"] == []
+    for text in SITES:
+        intent, source, _ = asyncio.run(router.route(text))
+        assert (intent, source) == ("browser", "keywords"), text
+    assert [t for t in NOT_SITES if router.SITE_RX.match(t.lower())] == []
+
+
 def test_youtube_controls_short_circuit(fake):
     for text in ["pause", "play number two", "play lofi music on YouTube"]:
         intent, source, _ = asyncio.run(router.route(text))

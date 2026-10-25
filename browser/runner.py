@@ -21,6 +21,7 @@ import goals
 import guard
 import lookup
 import readback
+import sites
 import tracelog
 import youtube
 from agents import StalePage
@@ -312,6 +313,22 @@ def youtube_run(task_id: str, plan: youtube.YouTubePlan) -> str:
     return youtube.results_say(query, videos)
 
 
+def site_open(task_id: str, plan: sites.SitePlan) -> dict:
+    """Open the site (via Google's first result when the name isn't known) and read the page. Never clicks anything."""
+    if plan.url:
+        agent = _start(task_id, plan.url, sites.goal(plan), plan.name)
+    else:
+        agent = _start(task_id, sites.search_url(plan.name), sites.goal(plan), plan.name)
+        url = sites.first_result(agent.browser)
+        if not url:
+            raise Failed(f"I couldn't find a website for {plan.name}.")
+        tracelog.emit(task_id, "act", f"open the first Google result: {url}")
+        sites.open_site(agent.browser, url)
+    page = sites.read(agent.browser, fallback=agent.state.get("page"))
+    tracelog.emit(task_id, "read", f"{page.get('title') or '(no title)'} | {page.get('url', '')}")
+    return page
+
+
 def send_and_verify(task: Task) -> str:
     b, name = task.agent.browser, task.plan.to_name
     try:
@@ -376,6 +393,12 @@ async def run_task(goal: str) -> dict:
             tracelog.emit(task_id, "answer", say, ms=int((time.monotonic() - t0) * 1000))
             return _reply(task_id, say)
         await _in_browser(store.close_current, timeout=5)
+        if isinstance(plan, goals.SitePlan):
+            tracelog.emit(task_id, "plan", f"Open {plan.name}: {plan.url or 'first Google result'}")
+            page = await _in_browser(site_open, task_id, plan, timeout=deadline - time.monotonic() + 4)
+            say = sites.say(plan, page, await sites.summary(page))
+            tracelog.emit(task_id, "answer", say, ms=int((time.monotonic() - t0) * 1000))
+            return _reply(task_id, say)
         left = lambda: deadline - time.monotonic() + 4   # noqa: E731  the loop stops at the deadline; this is slack
         if email:
             if not plan.message:
@@ -408,6 +431,7 @@ async def run_task(goal: str) -> dict:
     except asyncio.TimeoutError:
         say = ("I ran out of time on Gmail. Nothing was sent." if email
                else "I ran out of time on YouTube." if isinstance(plan, goals.YouTubePlan)
+               else f"I ran out of time opening {plan.name}." if isinstance(plan, goals.SitePlan)
                else "I ran out of time looking that up.")
         tracelog.emit(task_id, "fail", say)
         return _reply(task_id, say)

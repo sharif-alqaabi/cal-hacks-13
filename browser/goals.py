@@ -1,4 +1,5 @@
-"""Spoken request -> what to do: an email (to a known contact), a web lookup or YouTube (youtube.py, rules only).
+"""Spoken request -> what to do: an email (to a known contact), a web lookup, YouTube (youtube.py) or opening a
+website (sites.py); the last two are rules only.
 
 Claude Sonnet parses first (better message wording); regex rules are the fallback when there's no key,
 the call fails or it takes more than 3 s. Recipients only come from DEMO_CONTACTS: the agent never guesses an address.
@@ -9,7 +10,9 @@ from dataclasses import dataclass
 
 import config
 import llm
+import sites
 import youtube
+from sites import SitePlan
 from youtube import YouTubePlan
 
 log = logging.getLogger("browser.goals")
@@ -33,7 +36,7 @@ class Unsupported:
     say: str
 
 
-NOT_SUPPORTED = "On the laptop I can send an email, look something up or play YouTube videos."
+NOT_SUPPORTED = "On the laptop I can send an email, look something up, open a website or play YouTube videos."
 NO_MONEY = "I can't buy or pay for things. I can send an email or look something up."
 
 MONEY_RX = re.compile(r"\b(buy|purchase|pay|order|checkout|check out|subscribe|donate|transfer money|venmo)\b", re.I)
@@ -99,12 +102,22 @@ def _youtube(goal: str) -> YouTubePlan | Unsupported | None:
     return Unsupported(yt) if isinstance(yt, str) else yt
 
 
-def parse_regex(goal: str) -> EmailPlan | LookupPlan | YouTubePlan | Unsupported:
+def _site(goal: str) -> SitePlan | Unsupported | None:
+    site = sites.parse(goal)
+    return Unsupported(site) if isinstance(site, str) else site
+
+
+Plan = EmailPlan | LookupPlan | YouTubePlan | SitePlan | Unsupported
+
+
+def parse_regex(goal: str) -> Plan:
     text = goal.strip()
     if yt := _youtube(text):
         return yt
     if MONEY_RX.search(text):
         return Unsupported(NO_MONEY)
+    if site := _site(text):
+        return site
     for rx in EMAIL_RXS:
         m = rx.match(text)
         if m and (m.group("name").lower() not in {"me", "him", "her", "them", "a", "an"}):
@@ -115,11 +128,13 @@ def parse_regex(goal: str) -> EmailPlan | LookupPlan | YouTubePlan | Unsupported
     return Unsupported(NOT_SUPPORTED)
 
 
-async def parse(goal: str) -> EmailPlan | LookupPlan | YouTubePlan | Unsupported:
+async def parse(goal: str) -> Plan:
     if yt := _youtube(goal):   # before Claude: deterministic and instant, and "pause" must not wait 3 s
         return yt
     if MONEY_RX.search(goal):
         return Unsupported(NO_MONEY)
+    if site := _site(goal):
+        return site
     if llm.available():
         j = await llm.ask_json(PARSE_SYSTEM, goal, max_tokens=200, timeout=3.0)
         if j:
