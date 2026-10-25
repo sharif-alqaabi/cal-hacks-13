@@ -22,6 +22,7 @@ import guard
 import lookup
 import readback
 import tracelog
+import youtube
 from agents import StalePage
 
 log = logging.getLogger("browser.runner")
@@ -249,6 +250,68 @@ def lookup_more(agent, task_id: str, deadline: float):
     return out, text
 
 
+_yt: dict = {"agent": None, "results": []}   # the YouTube tab and the results last read aloud
+
+
+def _yt_agent():
+    """The open YouTube tab, if it is still the current one (an email or lookup replaces it)."""
+    agent = _yt["agent"]
+    return agent if agent is not None and agent is store.current else None
+
+
+def _yt_play(task_id: str, agent, video: youtube.Video, latest: bool = False) -> str:
+    tracelog.emit(task_id, "act", f"open {video.title}")
+    st = youtube.play(agent.browser, video)
+    say = youtube.playing_say(video, st, latest=latest)
+    if st.get("ad"):
+        tracelog.emit(task_id, "act", "ad playing: will press Skip ad when it appears")
+        EXEC.submit(youtube.skip_ads, agent.browser)   # after this reply; the next task queues behind it
+    return say
+
+
+def youtube_run(task_id: str, plan: youtube.YouTubePlan) -> str:
+    if plan.action in {"pause", "resume", "pick"}:
+        agent = _yt_agent()
+        if agent is None:
+            raise Failed("Ask me to find videos first, then pick one." if plan.action == "pick"
+                         else "Nothing is playing on YouTube right now.")
+        b = agent.browser
+        if plan.action == "pause":
+            tracelog.emit(task_id, "act", "pause the video")
+            return "Paused." if youtube.pause(b) else "I couldn't find a video to pause."
+        if plan.action == "resume":
+            tracelog.emit(task_id, "act", "play the video")
+            return "Playing again." if youtube.resume(b) else "I couldn't start the video."
+        results = _yt["results"]
+        if not results:
+            raise Failed("Ask me to find videos first, then pick one.")
+        if plan.pick > len(results):
+            raise Failed(f"There were only {len(results)} results.")
+        return _yt_play(task_id, agent, results[plan.pick - 1])
+
+    store.close_current()
+    if plan.action == "open":
+        agent = _start(task_id, "https://www.youtube.com/", "Open YouTube. Never subscribe, like, comment or buy.", "YouTube")
+        _yt.update(agent=agent, results=[])
+        return "YouTube is open. What should I search for? Say, for example, find videos about cooking."
+    query = plan.query
+    agent = _start(task_id, youtube.search_url(query), youtube.goal(plan), "YouTube")
+    _yt.update(agent=agent, results=[])
+    if plan.action == "latest":
+        video = youtube.latest_from(agent.browser, query)
+        if video is None:
+            raise Failed(f"I couldn't find a YouTube channel called {query}.")
+        return _yt_play(task_id, agent, video, latest=True)
+    videos = youtube.read_results(agent.browser)
+    tracelog.emit(task_id, "read", " | ".join(f"{v.title} ({v.channel}, {v.length})" for v in videos) or "(no results)")
+    if not videos:
+        raise Failed(f"I couldn't find any YouTube videos for {query}.")
+    if plan.action == "play":
+        return _yt_play(task_id, agent, videos[0])
+    _yt["results"] = videos
+    return youtube.results_say(query, videos)
+
+
 def send_and_verify(task: Task) -> str:
     b, name = task.agent.browser, task.plan.to_name
     try:
@@ -300,12 +363,18 @@ async def run_task(goal: str) -> dict:
     t0 = time.monotonic()
     deadline = t0 + config.TASK_BUDGET_S
     tracelog.emit(task_id, "goal", goal)
+    youtube.skip_stop.set()
     plan = await goals.parse(goal)
     email = isinstance(plan, goals.EmailPlan)
     try:
         if isinstance(plan, goals.Unsupported):
             tracelog.emit(task_id, "fail", plan.say)
             return _reply(task_id, plan.say)
+        if isinstance(plan, goals.YouTubePlan):   # pause/resume/pick keep the open tab, so no close_current here
+            tracelog.emit(task_id, "plan", f"YouTube {plan.action}: {plan.query or plan.pick or ''}".strip())
+            say = await _in_browser(youtube_run, task_id, plan, timeout=deadline - time.monotonic() + 4)
+            tracelog.emit(task_id, "answer", say, ms=int((time.monotonic() - t0) * 1000))
+            return _reply(task_id, say)
         await _in_browser(store.close_current, timeout=5)
         left = lambda: deadline - time.monotonic() + 4   # noqa: E731  the loop stops at the deadline; this is slack
         if email:
@@ -337,7 +406,9 @@ async def run_task(goal: str) -> dict:
         tracelog.emit(task_id, "fail", f.say)
         return _reply(task_id, f.say)
     except asyncio.TimeoutError:
-        say = "I ran out of time on Gmail. Nothing was sent." if email else "I ran out of time looking that up."
+        say = ("I ran out of time on Gmail. Nothing was sent." if email
+               else "I ran out of time on YouTube." if isinstance(plan, goals.YouTubePlan)
+               else "I ran out of time looking that up.")
         tracelog.emit(task_id, "fail", say)
         return _reply(task_id, say)
     except Exception:
