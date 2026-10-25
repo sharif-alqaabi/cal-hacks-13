@@ -243,20 +243,54 @@ def _start(task_id: str, url: str, goal: str, site: str):
     return agent
 
 
+FALLBACK_S = 8        # kept back from the agent so the prefilled-compose fallback still fits in the task budget
+PREFILL_WAIT_S = 5.0  # how long the prefilled compose gets to show its To chip and body
+
+
 def email_draft(task_id: str, plan: goals.EmailPlan, deadline: float):
+    """The agent types the draft on screen. If it stops early or the draft comes out wrong, open a compose page
+    prefilled from the plan instead, so a flaky agent run doesn't cost the demo. Either way the draft is read
+    back from the DOM and checked before anything can be sent."""
     agent = _start(task_id, gmail.compose_url(plan if config.GMAIL_PREFILL else None), gmail.goal(plan), "Gmail")
     if gmail.signed_out(agent.state["page"].get("url", "")):
         raise Failed(f"{NOT_SIGNED_IN} Nothing was sent.")
-    out = drive(agent, task_id, deadline)
-    if out.kind not in {"parked", "done"}:
-        raise Failed(explain(out, agent, "Gmail", email=True))
-    draft = gmail.read_draft(agent.browser)
+    if gmail.wait_compose(agent.browser):
+        agent.state["page"] = agent.browser.observe(screenshot=False)
+    if gmail.signed_out(agent.state["page"].get("url", "")):
+        raise Failed(f"{NOT_SIGNED_IN} Nothing was sent.")
+    out = drive(agent, task_id, deadline - min(FALLBACK_S, (deadline - time.monotonic()) / 3))
+    draft = gmail.read_draft(agent.browser) if out.kind in {"parked", "done"} else None
+    if draft is None or not gmail.addressed_to(draft, plan.to_addr, plan.to_name) or not draft.body:
+        why = explain(out, agent, "Gmail", email=False) if draft is None else "the draft didn't match"
+        log.warning("agent didn't finish the email (%s, %s); using a prefilled compose", out.kind, out.error or why)
+        tracelog.emit(task_id, "fail", f"Agent stopped ({why}). Opening a prefilled draft instead.")
+        agent, draft = _prefilled_draft(task_id, plan)
     tracelog.emit(task_id, "draft", f"To: {', '.join(draft.emails) or draft.to_text or '(empty)'} | "
                                  f"Subject: {draft.subject or '(none)'} | Body: {draft.body or '(empty)'}")
     if not gmail.addressed_to(draft, plan.to_addr, plan.to_name):
         raise Failed(f"The draft isn't addressed to {plan.to_name}, so I won't send it. Please ask me again.")
     if not draft.body:
         raise Failed("I couldn't write the message. Nothing was sent.")
+    return agent, draft
+
+
+def _prefilled_draft(task_id: str, plan: goals.EmailPlan):
+    """Fresh tab on a compose URL that already carries To, Subject and Body. No model calls, nothing clicked."""
+    agent = _start(task_id, gmail.compose_url(plan), "Check the prefilled email draft. Do not click Send.", "Gmail")
+    url = agent.state["page"].get("url", "")
+    if gmail.signed_out(url):
+        raise Failed(f"{NOT_SIGNED_IN} Nothing was sent.")
+    gmail.wait_compose(agent.browser)
+    deadline = time.monotonic() + PREFILL_WAIT_S
+    while True:   # the To chip and body can land a moment after the Subject input
+        try:
+            draft = gmail.read_draft(agent.browser)
+        except StalePage:
+            draft = gmail.Draft()
+        if (draft.body and gmail.addressed_to(draft, plan.to_addr, plan.to_name)) or time.monotonic() >= deadline:
+            break
+        time.sleep(0.3)
+    agent.state["page"] = agent.browser.observe(screenshot=False)
     return agent, draft
 
 

@@ -148,6 +148,8 @@ class FakeBrowser:
             return False
         if expression == guard.BLOCKED_COUNT_JS:
             return self.dom_blocked
+        if expression == gmail.COMPOSE_READY_JS:
+            return self._kind() == "compose"
         if expression == gmail.READ_DRAFT_JS:
             to = self.fields["to"]
             return {"emails": gmail.EMAIL_RX.findall(to), "names": [], "to_text": to,

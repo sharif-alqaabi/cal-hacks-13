@@ -9,6 +9,7 @@ import config
 import fake_agent
 import guard
 import runner
+import tracelog
 
 sys.path.insert(0, str(config.HERE.parent / "core"))
 from contracts.browser import SayResp as CoreSayResp  # noqa: E402
@@ -90,23 +91,31 @@ def test_agent_saying_done_still_needs_confirmation(client, monkeypatch):
     assert r.needs_confirm and fake_agent.SENT == []
 
 
-@pytest.mark.parametrize("script,say", [
-    ("blocked", "I got stuck on Gmail. Nothing was sent."),
-    ("wrong_to", "The draft isn't addressed to Sam, so I won't send it. Please ask me again."),
-    ("signed_out", "The laptop isn't signed in to email. Nothing was sent."),
-])
-def test_failures_are_spoken(client, monkeypatch, script, say):
-    monkeypatch.setenv("FAKE_SCRIPT", script)
+def test_signed_out_is_spoken(client, monkeypatch):
+    monkeypatch.setenv("FAKE_SCRIPT", "signed_out")
     r = task(client)
-    assert (r.say, r.needs_confirm) == (say, False)
+    assert (r.say, r.needs_confirm) == ("The laptop isn't signed in to email. Nothing was sent.", False)
     assert fake_agent.SENT == []
 
 
-def test_timeout_is_spoken(client, monkeypatch):
-    monkeypatch.setenv("FAKE_SCRIPT", "stuck")
-    monkeypatch.setattr(config, "TASK_BUDGET_S", 0.3)
+@pytest.mark.parametrize("script", ["blocked", "wrong_to", "stuck"])
+def test_agent_failure_falls_back_to_a_prefilled_draft(client, monkeypatch, script):
+    monkeypatch.setenv("FAKE_SCRIPT", script)
     r = task(client)
-    assert r.say == "I ran out of time on Gmail. Nothing was sent." and not r.needs_confirm
+    assert r.needs_confirm and r.say.startswith("Draft to Sam, subject: I'm at the Palace of Fine Arts.")
+    assert "fail" in [e["kind"] for e in tracelog.since(0)]   # the trace says the agent stopped
+    assert fake_agent.SENT == []
+    assert confirm(client, r.task_id, True) == "Sent to Sam. I checked your Sent folder."
+    assert fake_agent.SENT[0]["to"] == "sam.calhacks.demo@gmail.com"
+
+
+def test_wrong_draft_after_fallback_is_refused(client, monkeypatch):
+    monkeypatch.setenv("FAKE_SCRIPT", "wrong_to")
+    monkeypatch.setattr(runner, "PREFILL_WAIT_S", 0.2)
+    monkeypatch.setattr(runner.gmail, "compose_url", lambda plan=None: "https://mail.google.com/mail/u/0/?view=cm&fs=1&tf=1")
+    r = task(client)
+    assert (r.say, r.needs_confirm) == ("The draft isn't addressed to Sam, so I won't send it. Please ask me again.", False)
+    assert fake_agent.SENT == []
 
 
 @pytest.mark.parametrize("error,say", [

@@ -31,6 +31,8 @@ READ_DRAFT_JS = r"""(() => {
           subject: subjectEl ? subjectEl.value : '', body: bodyEl ? bodyEl.innerText.trim() : ''};
 })()"""
 
+COMPOSE_READY_JS = """!!document.querySelector('input[name="subjectbox"], input[aria-label="Subject" i], input[placeholder="Subject" i]')"""
+
 SENT_ROWS_JS = r"""(() => [...document.querySelectorAll('tr.zA')].slice(0, 8)
   .map(r => (r.innerText || '').replace(/\s+/g, ' ').trim()))()"""
 
@@ -84,6 +86,20 @@ def read_draft(browser) -> Draft:
     emails = sorted({*(e.lower() for e in v.get("emails", [])), *(m.lower() for m in EMAIL_RX.findall(to_text))})
     body = (v.get("body", "") or "").split("\n-- \n")[0].strip()   # drop a signature block
     return Draft(emails=emails, to_text=to_text, subject=(v.get("subject", "") or "").strip(), body=body)
+
+
+def wait_compose(browser, timeout_s: float = 8.0) -> bool:
+    """Gmail is a single-page app: readyState is "complete" long before the compose form renders, and an agent
+    that looks too early sees no fields and says BLOCKED. Wait for the Subject input instead."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        try:
+            if browser.evaluate(COMPOSE_READY_JS):
+                return True
+        except StalePage:
+            pass
+        time.sleep(0.25)
+    return False
 
 
 def addressed_to(draft: Draft, addr: str, name: str) -> bool:
