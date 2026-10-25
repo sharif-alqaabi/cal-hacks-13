@@ -1,6 +1,8 @@
 """End-to-end test with real calls to everything: the endpoints, Moss, SpacetimeDB, and Claude (about 10 Haiku
 and a few Sonnet calls, a few cents). Mock scenes are written descriptions, so Claude captions text, not pixels.
-It wipes the database first and again at the end.
+It wipes its database first and again at the end, so it always runs against calhacks13-memory-test, whatever
+SPACETIME_DB says in .env, and refuses calhacks13-memory (the real timeline). E2E_SPACETIME_DB picks another test
+database; publish the module to it first: spacetime publish -s maincloud -p memory/spacetimedb <name>
 
     set -a; source memory/.env; set +a; memory/.venv/bin/python memory/e2e.py
 """
@@ -14,6 +16,10 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE), str(HERE / "mock")]
 os.environ.update(MEMORY_TEST_SCENES="1", MEMORY_ALLOW_RESET="1")
+LIVE_DB = "calhacks13-memory"
+os.environ["SPACETIME_DB"] = os.getenv("E2E_SPACETIME_DB", "calhacks13-memory-test")  # before anything connects
+if os.environ["SPACETIME_DB"] == LIVE_DB:
+    sys.exit(f"refusing to run: e2e.py wipes its database, and {LIVE_DB} holds the real timeline")
 
 import httpx  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
