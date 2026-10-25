@@ -1,8 +1,11 @@
 """Spoken request -> what to do: an email (to a known contact), a web lookup, YouTube (youtube.py), opening a
-website (sites.py) or reading the inbox (inbox.py); the last three are rules only.
+website or tab (sites.py) or reading the inbox (inbox.py).
 
-Claude Sonnet parses first (better message wording); regex rules are the fallback when there's no key,
-the call fails or it takes more than 3 s. Recipients only come from DEMO_CONTACTS: the agent never guesses an address.
+The exact phrases in each module's rules are instant shortcuts. Anything they miss goes to Claude Sonnet, which maps
+loose wording ("put on some lofi", "anything from Sam?") onto the same plans; the regex rules are the fallback when
+there's no key, the call fails or it takes more than 3 s. Claude labels post/like/subscribe/delete asks unsupported,
+and the YouTube, inbox and site flows can't do those anyway: they never click anything but a video.
+Recipients only come from DEMO_CONTACTS: the agent never guesses an address.
 """
 import logging
 import re
@@ -59,12 +62,26 @@ LOOKUP_STRIP = re.compile(LEAD + r"(?:look up|search for|search|google|find out)
 LISTING_RX = re.compile(LEAD + r"(?:search|google)(?: google| search)?(?:\s+for)?\s+"
                         r"(?!(?:for|google|search|when|what|how|where|who|why|is|are|does|do|can)\b)", re.I)
 
-PARSE_SYSTEM = """You turn a blind user's spoken request for their laptop into JSON. Reply with JSON only:
-{"kind": "email" | "lookup" | "unsupported", "to_name": "", "message": "", "subject": "", "query": ""}
-email: to_name is the recipient exactly as spoken (usually a first name); message is the email body in the
-user's own first-person voice, one or two short sentences, keeping their words; subject is 3 to 7 words.
-lookup: query is a short web search query that answers the question.
-unsupported: anything else, including purchases, payments, passwords, uploads or apps other than the web browser."""
+PARSE_SYSTEM = """You turn a blind user's spoken request for their laptop's web browser into JSON. The wording is
+loose speech: work out what they mean, not what they literally said. Reply with JSON only:
+{"kind": "...", "to_name": "", "message": "", "subject": "", "query": "", "action": "", "pick": 0, "sender": "", "site": ""}
+kind is one of:
+email: write an email. to_name is the recipient exactly as spoken (usually a first name); message is the email body
+  in the user's own first-person voice, one or two short sentences, keeping their words; subject is 3 to 7 words.
+lookup: a question to answer from the web. query is a short web search query that answers it.
+search: they want Google results listed, not one answer ("google X", "find me some pages about X"). query as above.
+youtube: videos or music. action is search (list videos), play (play the top video for query), latest (newest upload
+  from the channel in query), pause, resume, or open (just open YouTube). query is what to search for.
+inbox: reading their email. action is list (new or unread emails) or read (one email: sender is who it's from, or
+  pick is its number 1-3 from the list read out).
+pick: choose a numbered result just read out ("the second one", "go with number three"). pick is 1-3.
+site: open a website. site is its name or domain ("instagram", "nytimes.com").
+new_tab: open a new browser tab; site is optional, the site to open in it.
+close_tab: close the current tab.
+back / forward: the browser's back or forward arrow.
+unsupported: anything else, including purchases, payments, passwords, uploads, apps other than the web browser,
+  or posting, liking, subscribing, commenting, deleting, archiving or forwarding anything.
+Questions ("what time does Ace close?", "what's the weather?") are lookup, not site."""
 
 
 def contacts() -> dict[str, str]:
@@ -145,6 +162,63 @@ def parse_regex(goal: str) -> Plan:
     return Unsupported(NOT_SUPPORTED)
 
 
+def _ordinal(v) -> int:
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        return 0
+    return n if 1 <= n <= 3 else 0
+
+
+def _open_site(name: str) -> SitePlan | Unsupported | None:
+    """Claude's site name through sites.py's rules, so known names, domains and refusals behave as when spoken."""
+    name = name.strip(" .")
+    if not name:
+        return None
+    site = _site(f"open {name}")
+    return site if isinstance(site, (SitePlan, Unsupported)) else SitePlan("", sites._title_case(name))
+
+
+def from_claude(goal: str, j: dict) -> Plan | None:
+    """Claude's JSON -> one of the plans the rules make. None when the answer is unusable (the rules then decide)."""
+    kind = (j.get("kind") or "").strip().lower()
+    action = (j.get("action") or "").strip().lower()
+    query = (j.get("query") or "").strip()
+    pick = _ordinal(j.get("pick"))
+    text = " ".join(goal.replace("’", "'").split())
+    if kind == "email" and j.get("to_name"):
+        return _email(j["to_name"], j.get("message", ""), j.get("subject", ""))
+    if kind in {"lookup", "search"} and query:
+        return LookupPlan(query=query, listing=kind == "search" or bool(LISTING_RX.match(goal.strip())))
+    if kind == "youtube":
+        if action in {"pause", "resume", "open"}:
+            return YouTubePlan(action)
+        if action in {"search", "play", "latest"} and query:
+            return YouTubePlan(action, query=query)
+        return YouTubePlan("open") if not query else YouTubePlan("search", query=query)
+    if kind == "pick" and pick:
+        return YouTubePlan("pick", pick=pick)   # the runner opens a search result or a video, whichever was read out
+    if kind == "inbox":
+        sender = (j.get("sender") or "").strip()
+        if inbox.UNSAFE_RX.search(text.replace(sender, "") if sender else text):   # "Mark" is a name, not "mark as read"
+            return Unsupported(inbox.REFUSE)
+        if action == "read" and (sender or pick):
+            return InboxPlan("read", sender=sender, pick=0 if sender else pick)
+        return InboxPlan("list")
+    if kind in {"site", "new_tab"}:
+        site = _open_site(j.get("site") or "")
+        if kind == "new_tab":
+            return site if isinstance(site, Unsupported) else TabPlan("new", site)
+        return site
+    if kind == "close_tab":
+        return TabPlan("close")
+    if kind in {"back", "forward"}:
+        return NavPlan(kind)
+    if kind == "unsupported":
+        return Unsupported(NOT_SUPPORTED)
+    return None
+
+
 async def parse(goal: str) -> Plan:
     if yt := _youtube(goal):   # before Claude: deterministic and instant, and "pause" must not wait 3 s
         return yt
@@ -156,13 +230,7 @@ async def parse(goal: str) -> Plan:
         return site
     if llm.available():
         j = await llm.ask_json(PARSE_SYSTEM, goal, max_tokens=200, timeout=3.0)
-        if j:
-            kind = j.get("kind")
-            if kind == "email" and j.get("to_name"):
-                return _email(j["to_name"], j.get("message", ""), j.get("subject", ""))
-            if kind == "lookup" and j.get("query"):
-                return _lookup(goal, j["query"].strip())
-            if kind == "unsupported":
-                return Unsupported(NOT_SUPPORTED)
+        if j and (plan := from_claude(goal, j)):
+            return plan
         log.info("claude parse unavailable or unusable, using rules")
     return parse_regex(goal)

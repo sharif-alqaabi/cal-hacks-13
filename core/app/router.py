@@ -73,8 +73,8 @@ JEV_CRITERIA = {
     "recall": "Asks about anything from earlier, however it is phrased: where they left or last saw something, what else was somewhere, what someone looked like or wore, who they met or talked to, who someone is ('who is this?', since only memory knows names), 'do you know where my keys are', 'have you seen my wallet', 'do you remember', 'did I'",
     "remember": "Introduces a person or asks to remember something",
     "lost": "Says they are lost, need help, or want their family told where they are",
-    "browser": "Wants a task done on the laptop or web, like sending an email, reading new emails (\"any new emails?\", \"read the one from Sam\"), searching Google or opening a search result, opening a website (\"go to Instagram\"), opening or closing a tab, "
-               "or YouTube: finding, playing, picking (\"play number two\"), pausing or resuming a video",
+    "browser": "Wants a task done on the laptop or web, however loosely it is phrased, like sending an email, reading new emails (\"any new emails?\", \"read the one from Sam\"), searching Google or opening a search result, opening a website (\"go to Instagram\"), opening or closing a tab, "
+               "or YouTube: finding, playing, picking (\"play number two\"), pausing or resuming a video, or putting on music",
     "confirm": "Answers yes or no to a pending draft",
     "task": "Work mode: checks whether a held item is the right one for an order",
     "other": "Anything else, small talk or a general question",
@@ -88,7 +88,7 @@ ROUTER_SYSTEM = (
     "(where something was left or last seen, what else was somewhere, who they met, "
     "what someone wore, \"do you know where my keys are\", \"have you seen\"); "
     "remember=introducing a person or asking to remember something; lost=lost or needs help; "
-    "browser=email/web task on the laptop, including reading the inbox (any new emails, read the one from Sam), a Google search and opening one of its results, opening a website (go to Instagram, open nytimes.com), opening or closing a browser tab, and YouTube (find, play, pick a numbered result, pause, resume a video); confirm=yes/no answer to a pending draft; task=checking items in work mode; other=anything else."
+    "browser=email/web task on the laptop, including reading the inbox (any new emails, read the one from Sam), a Google search and opening one of its results, opening a website (go to Instagram, open nytimes.com), opening or closing a browser tab, and YouTube (find, play, pick a numbered result, pause, resume a video, put on music), however loosely it is worded; confirm=yes/no answer to a pending draft; task=checking items in work mode; other=anything else."
 )
 
 
