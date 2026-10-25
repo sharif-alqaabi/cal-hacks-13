@@ -16,11 +16,26 @@ from urllib.parse import parse_qs, urlparse
 
 import gmail
 import guard
+import inbox
+import lookup
 import sites
 from agents import StalePage
 
 SENT: list[dict] = []        # every email the fake Gmail actually sent (shared across tabs, like a real mailbox)
 VIOLATIONS: list[dict] = []  # sends that happened with the guard closed
+RESULTS = [{"title": "Ace Hardware Polk St - Hours and Directions", "href": "https://www.acehardware.com/store/polk",
+            "site": "Ace Hardware"},
+           {"title": "Ace Hardware | Yelp", "href": "https://www.yelp.com/biz/ace-polk", "site": "Yelp · 120 reviews"},
+           {"title": "Hardware stores near Polk St", "href": "https://www.example.com/hardware", "site": ""}]
+INBOX = [{"unread": True, "who": [{"name": "Sam Lee", "email": "sam.calhacks.demo@gmail.com"}], "subject": "Lunch tomorrow?",
+          "snippet": " - Want to grab lunch at noon?", "thread": "t-sam"},
+         {"unread": True, "who": [{"name": "Google", "email": "no-reply@google.com"}], "subject": "Security alert",
+          "snippet": " - A new sign-in on Mac OS", "thread": "t-google"},
+         {"unread": False, "who": [{"name": "me", "email": "me@example.com"}, {"name": "Priya", "email": "priya@example.com"}],
+          "subject": "Slides", "snippet": " - Here they are", "thread": "t-priya"}]
+BODIES = {"t-sam": "Hi! Want to grab lunch tomorrow at noon at Tartine? Let me know. Sam",
+          "t-google": "A new sign-in on Mac OS. If this was you, you don't need to do anything.",
+          "t-priya": "Here are the slides for Sunday."}
 LOOKUP_TEXT = "Ace Hardware Polk St\nHardware store in San Francisco\nOpen ⋅ Closes 9 PM\n(415) 555-0100"
 
 
@@ -52,6 +67,10 @@ class FakeBrowser:
             return "compose"
         if "mail.google.com" in self.url and "#sent" in self.url:
             return "sent"
+        if "mail.google.com" in self.url and "#inbox/" in self.url:
+            return "thread"
+        if "mail.google.com" in self.url and "#inbox" in self.url:
+            return "inbox"
         if "google.com/search" in self.url:
             return "search"
         return "other"
@@ -129,6 +148,17 @@ class FakeBrowser:
                     "description": "", "heading": "", "text": self._text()}
         if expression == sites.FIRST_RESULT_JS:
             return "https://www.calhacks.io/" if self._kind() == "search" else None
+        if expression == lookup.RESULTS_JS:
+            return RESULTS if self._kind() == "search" else []
+        if expression == inbox.ROWS_JS:
+            return INBOX if self._kind() == "inbox" else None
+        if expression == inbox.MESSAGE_JS:
+            t = self.url.rsplit("/", 1)[-1]
+            row = next((r for r in INBOX if r["thread"] == t), None)
+            return {"subject": row["subject"], "sender": row["who"][-1]["name"], "address": row["who"][-1]["email"],
+                    "body": BODIES[t]} if row and self._kind() == "thread" else None
+        if expression == "location.href":
+            return self.url
         if expression == gmail.SENT_ROWS_JS:
             return self._sent_rows() if self._kind() == "sent" else []
         return None

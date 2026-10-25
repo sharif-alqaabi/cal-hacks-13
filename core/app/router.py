@@ -42,6 +42,18 @@ SITE_RX = re.compile(
     r"|^(?:can you |could you |please )*(?:open|close|start)\s+(?:up\s+)?(?:a |this |the |that |another |my )?"
     r"(?:new |blank |current )?(?:browser )?tab\b")
 
+# Reading the inbox ("any new emails?", "read the one from Sam") and searching Google ("search for tacos", "open the
+# second result") are always the browser: a classifier can read "read the one from Sam" as memory.
+MAIL = r"(?:e-?mails?|mail|inbox)"
+WEB_RX = re.compile(
+    r"^(?:hey |ok |okay )?(?:can you |could you |would you |please )*(?:"
+    rf"(?:do i have |are there |did i get )?any (?:new |unread )?{MAIL}"
+    rf"|(?:read|check|go through|what'?s in)(?: me)? my (?:new |unread )?(?:{MAIL}|messages)"
+    rf"|(?:do i have|i have) (?:new|unread) (?:{MAIL}|messages)"
+    r"|(?:read|open)(?: me)? (?:the |that )?(?:one|e-?mail|message|mail) from\b"
+    r"|(?:search|google)(?: google| search)?(?: for)?\s+\S"
+    r"|open (?:the )?(?:number )?(?:one|two|three|1|2|3|first|second|third|top|last) (?:result|link)$)")
+
 # Past-tense wording means the answer is in memory, not in the camera ("what color was the car", "have you seen my
 # wallet", "did I leave the stove on"). Only overrides describe/other/recall, so "email Sam that I left 5 minutes ago",
 # "did the walk sign turn on" and "this is Sam, I saw him earlier" keep their own intents.
@@ -54,7 +66,7 @@ JEV_CRITERIA = {
     "recall": "Asks about anything from earlier, however it is phrased: where they left or last saw something, what else was somewhere, what someone looked like or wore, who they met or talked to, who someone is ('who is this?', since only memory knows names), 'do you know where my keys are', 'have you seen my wallet', 'do you remember', 'did I'",
     "remember": "Introduces a person or asks to remember something",
     "lost": "Says they are lost, need help, or want their family told where they are",
-    "browser": "Wants a task done on the laptop or web, like sending an email, opening a website (\"go to Instagram\"), opening or closing a tab, "
+    "browser": "Wants a task done on the laptop or web, like sending an email, reading new emails (\"any new emails?\", \"read the one from Sam\"), searching Google or opening a search result, opening a website (\"go to Instagram\"), opening or closing a tab, "
                "or YouTube: finding, playing, picking (\"play number two\"), pausing or resuming a video",
     "confirm": "Answers yes or no to a pending draft",
     "task": "Work mode: checks whether a held item is the right one for an order",
@@ -69,13 +81,13 @@ ROUTER_SYSTEM = (
     "(where something was left or last seen, what else was somewhere, who they met, "
     "what someone wore, \"do you know where my keys are\", \"have you seen\"); "
     "remember=introducing a person or asking to remember something; lost=lost or needs help; "
-    "browser=email/web task on the laptop, including opening a website (go to Instagram, open nytimes.com), opening or closing a browser tab, and YouTube (find, play, pick a numbered result, pause, resume a video); confirm=yes/no answer to a pending draft; task=checking items in work mode; other=anything else."
+    "browser=email/web task on the laptop, including reading the inbox (any new emails, read the one from Sam), a Google search and opening one of its results, opening a website (go to Instagram, open nytimes.com), opening or closing a browser tab, and YouTube (find, play, pick a numbered result, pause, resume a video); confirm=yes/no answer to a pending draft; task=checking items in work mode; other=anything else."
 )
 
 
 def keyword_route(text: str) -> str:
     t = text.lower().replace("’", "'").strip()
-    if SITE_RX.match(t.rstrip(".!?")):
+    if SITE_RX.match(t.rstrip(".!?")) or WEB_RX.match(t.rstrip(".!?")):
         return "browser"
     for intent, pat in KEYWORDS:
         if re.search(pat, t):
@@ -137,7 +149,7 @@ async def route(text: str, pending_confirm: bool = False) -> tuple[str, str, int
     if pending_confirm and hint == "confirm":
         return done("confirm", "keywords")
     said = text.lower().replace("’", "'").strip().rstrip(".!?")
-    if YOUTUBE_RX.search(said) or SITE_RX.match(said):
+    if YOUTUBE_RX.search(said) or SITE_RX.match(said) or WEB_RX.match(said):
         return done("browser", "keywords")
     # Past tense goes straight to memory, without waiting on Jev: the camera can't answer about earlier.
     if hint in PAST_OVERRIDES and PAST.search(text.lower().replace("’", "'")):

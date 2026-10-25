@@ -29,7 +29,7 @@ PAUSE_RX = re.compile(LEAD + r"(?:pause|stop)(?: (?:it|that|the video|the music|
 RESUME_RX = re.compile(LEAD + r"(?:resume|unpause|keep playing|continue(?: playing| the video)?|play|play it|"
                        r"start it again|keep going)(?: (?:it|the video|again))?" + TAIL, re.I)
 PICK_RX = re.compile(LEAD + r"(?:play|pick|choose|open|watch|go with)?\s*(?:the\s+)?(?:number\s+)?"
-                     r"(?P<n>one|two|three|1|2|3|first|second|third|top|last)(?:\s+(?:one|video|result))?" + TAIL, re.I)
+                     r"(?P<n>one|two|three|1|2|3|first|second|third|top|last)(?:\s+(?:one|video|result|link))?" + TAIL, re.I)
 LATEST_RX = re.compile(LEAD + r"(?:play|put on|show me|watch|find)?\s*(?:me\s+)?(?:the\s+)?(?:latest|newest|most recent|new)\s+"
                        r"(?:youtube\s+)?(?:video|upload|episode)\s+(?:from|by|on)\s+(?P<ch>.+?)(?:'s)?(?:\s+channel)?" + TAIL, re.I)
 SEARCH_RX = re.compile(LEAD + r"(?:find|search(?: youtube)?(?: for)?|look up|look for|show me|get me|what are)\s+"

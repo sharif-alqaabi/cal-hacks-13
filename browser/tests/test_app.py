@@ -141,7 +141,14 @@ def test_lookup_answers_without_confirm(client):
     assert (r.say, r.needs_confirm) == ("It's open now and closes at 9 PM.", False)
 
 
-def test_lookup_without_an_answer_says_what_it_searched(client):
+def test_lookup_without_an_answer_reads_the_results(client):
+    r = task(client, "look up the weather in Berkeley")
+    assert r.say.startswith("I couldn't find a direct answer. Here are the top results. One: Ace Hardware Polk St.")
+    assert not r.needs_confirm
+
+
+def test_lookup_without_an_answer_says_what_it_searched(client, monkeypatch):
+    monkeypatch.setattr(fake_agent, "RESULTS", [])
     r = task(client, "look up the weather in Berkeley")
     assert (r.say, r.needs_confirm) == ("I couldn't find the answer. I searched Google for the weather in Berkeley.", False)
     kinds = [e["kind"] for e in client.get("/trace/latest").json() if e["task_id"] == r.task_id]

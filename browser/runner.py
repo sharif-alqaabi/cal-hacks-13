@@ -19,6 +19,7 @@ import config
 import gmail
 import goals
 import guard
+import inbox
 import lookup
 import readback
 import sites
@@ -258,6 +259,36 @@ def lookup_open(task_id: str, plan: goals.LookupPlan):
     return agent, agent.state["page"].get("text", "")
 
 
+_search: dict = {"agent": None, "results": [], "query": ""}   # the Google tab and its top results
+
+
+def lookup_results(task_id: str, agent, query: str, wait_s: float = 5.0) -> list:
+    results = lookup.read_results(agent.browser, timeout=wait_s)
+    _search.update(agent=agent, results=results, query=query)
+    tracelog.emit(task_id, "read", " | ".join(f"{r.title} ({r.site})" for r in results) or "(no results)")
+    return results
+
+
+def _search_agent():
+    agent = _search["agent"]
+    return agent if agent is not None and agent is store.current else None
+
+
+def search_pick(task_id: str, pick: int):
+    """"open the second result": open that link in the search tab and read the page. Never clicks anything."""
+    agent, results = _search_agent(), _search["results"]
+    if agent is None or not results:
+        raise Failed("Ask me to search for something first, then pick a result.")
+    if pick > len(results):
+        raise Failed(f"There were only {len(results)} results.")
+    r = results[pick - 1]
+    tracelog.emit(task_id, "act", f"open result {pick}: {r.href}")
+    sites.open_site(agent.browser, r.href)
+    page = sites.read(agent.browser, fallback=agent.state.get("page"))
+    tracelog.emit(task_id, "read", f"{page.get('title') or '(no title)'} | {page.get('url', '')}")
+    return r, page
+
+
 def lookup_more(agent, task_id: str, deadline: float):
     out = drive(agent, task_id, deadline, max_steps=config.LOOKUP_MAX_STEPS)
     try:
@@ -327,6 +358,68 @@ def youtube_run(task_id: str, plan: youtube.YouTubePlan) -> str:
         return _yt_play(task_id, agent, videos[0])
     _yt["results"] = videos
     return youtube.results_say(query, videos)
+
+
+_mail: dict = {"agent": None, "mails": [], "listed": []}   # the Gmail inbox tab, its rows and the ones read aloud
+
+
+def _mail_agent():
+    agent = _mail["agent"]
+    return agent if agent is not None and agent is store.current else None
+
+
+def _open_inbox(task_id: str):
+    agent = _mail_agent()
+    if agent is None:
+        store.close_current()
+        agent = _start(task_id, inbox.inbox_url(), inbox.goal(), "Gmail")
+        _mail.update(agent=agent, mails=[], listed=[])
+    else:
+        agents.navigate(agent.browser, inbox.inbox_url())
+        time.sleep(0.5)
+    mails = inbox.read_rows(agent.browser)
+    if mails is None:
+        try:
+            url = agent.browser.evaluate("location.href") or ""
+        except Exception:
+            url = agent.state.get("page", {}).get("url", "")
+        raise Failed(NOT_SIGNED_IN if gmail.signed_out(url) else "Your inbox didn't load.")
+    _mail["mails"] = mails
+    return agent, mails
+
+
+def inbox_run(task_id: str, plan: inbox.InboxPlan) -> dict:
+    """Read-only: opens the inbox or one email by URL. Never clicks, so nothing is archived, deleted or replied to."""
+    if plan.action == "list":
+        agent, mails = _open_inbox(task_id)
+        _mail["listed"] = [m for m in mails if m.unread][:inbox.TOP_N]
+        tracelog.emit(task_id, "read", " | ".join(f"{m.sender}: {m.subject}" for m in _mail["listed"]) or "(no unread)")
+        return {"say": inbox.list_say(mails)}
+    agent = _mail_agent()
+    mails = _mail["mails"] if agent else []
+    if plan.sender:
+        mail = inbox.find(mails, plan.sender) if mails else None
+        if mail is None:
+            agent, mails = _open_inbox(task_id)
+            mail = inbox.find(mails, plan.sender)
+        if mail is None:
+            raise Failed(f"I don't see an email from {plan.sender} in your inbox.")
+    else:
+        if agent is None:
+            agent, mails = _open_inbox(task_id)
+        pool = (_mail["listed"] if agent is _mail["agent"] else []) or [m for m in mails if m.unread] or mails
+        if not pool:
+            raise Failed("Your inbox is empty.")
+        if plan.pick > len(pool):
+            raise Failed(f"I only read out {len(pool)}.")
+        mail = pool[plan.pick - 1]
+    if not mail.thread:
+        raise Failed(f"I couldn't open the email from {mail.sender}.")
+    tracelog.emit(task_id, "act", f"open the email from {mail.sender}: {mail.subject}")
+    msg = inbox.open_mail(agent.browser, mail)
+    tracelog.emit(task_id, "read", f"{msg.get('sender') or mail.sender} | {msg.get('subject') or mail.subject} | "
+                                   f"{' '.join((msg.get('body') or '').split())[:200] or '(no body)'}")
+    return {"mail": mail, "msg": msg}
 
 
 def site_open(task_id: str, plan: sites.SitePlan) -> dict:
@@ -423,6 +516,19 @@ async def run_task(goal: str) -> dict:
         if isinstance(plan, goals.Unsupported):
             tracelog.emit(task_id, "fail", plan.say)
             return _reply(task_id, plan.say)
+        if isinstance(plan, goals.YouTubePlan) and plan.action == "pick" and _search_agent() is not None:
+            tracelog.emit(task_id, "plan", f"Open search result {plan.pick}")   # "open the second result"
+            r, page = await _in_browser(search_pick, task_id, plan.pick, timeout=deadline - time.monotonic() + 4)
+            say = lookup.opened_say(r, await sites.summary(page))
+            tracelog.emit(task_id, "answer", say, ms=int((time.monotonic() - t0) * 1000))
+            return _reply(task_id, say)
+        if isinstance(plan, goals.InboxPlan):   # reuses the inbox tab, so no close_current here
+            tracelog.emit(task_id, "plan", "Read the inbox" if plan.action == "list"
+                          else f"Read the email from {plan.sender}" if plan.sender else f"Read email {plan.pick}")
+            out = await _in_browser(inbox_run, task_id, plan, timeout=deadline - time.monotonic() + 4)
+            say = out.get("say") or inbox.read_say(out["mail"], out["msg"], await inbox.body_line(out["msg"].get("body", "")))
+            tracelog.emit(task_id, "answer", say, ms=int((time.monotonic() - t0) * 1000))
+            return _reply(task_id, say)
         if isinstance(plan, goals.YouTubePlan):   # pause/resume/pick keep the open tab, so no close_current here
             tracelog.emit(task_id, "plan", f"YouTube {plan.action}: {plan.query or plan.pick or ''}".strip())
             say = await _in_browser(youtube_run, task_id, plan, timeout=deadline - time.monotonic() + 4)
@@ -458,10 +564,20 @@ async def run_task(goal: str) -> dict:
 
         tracelog.emit(task_id, "plan", f"Look up: {plan.query}")
         agent, text = await _in_browser(lookup_open, task_id, plan, timeout=left())
+        if plan.listing:   # "search for X": read the top results
+            results = await _in_browser(lookup_results, task_id, agent, plan.query, timeout=left())
+            say = lookup.results_say(plan.query, results)
+            tracelog.emit(task_id, "answer" if results else "fail", say, ms=int((time.monotonic() - t0) * 1000))
+            return _reply(task_id, say)
         ans = await lookup.answer(plan.query, text)
+        results = await _in_browser(lookup_results, task_id, agent, plan.query, 1.5, timeout=left())   # for "open the first result"
         if not ans:
             out, text = await _in_browser(lookup_more, agent, task_id, deadline, timeout=left())
             ans = await lookup.answer(plan.query, text)
+            if not ans and results and out.kind != "error":   # still no answer: read the links from the first page
+                say = lookup.results_say(plan.query, results, lead="I couldn't find a direct answer. Here are the top results.")
+                tracelog.emit(task_id, "answer", say, ms=int((time.monotonic() - t0) * 1000))
+                return _reply(task_id, say)
             if not ans:
                 say = (explain(out, agent, "Google", email=False) if out.kind in {"error", "timeout", "blocked"}
                        else f"I couldn't find the answer. I searched Google for {plan.query}.")
@@ -477,6 +593,7 @@ async def run_task(goal: str) -> dict:
                else "I ran out of time on YouTube." if isinstance(plan, goals.YouTubePlan)
                else f"I ran out of time opening {plan.name}." if isinstance(plan, goals.SitePlan)
                else "I ran out of time with the tabs." if isinstance(plan, goals.TabPlan)
+               else "I ran out of time reading your email." if isinstance(plan, goals.InboxPlan)
                else "I ran out of time looking that up.")
         tracelog.emit(task_id, "fail", say)
         return _reply(task_id, say)

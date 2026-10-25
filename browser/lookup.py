@@ -1,9 +1,16 @@
-"""Web lookups (PRD 4 B-5): open a Google search, answer from the page in one spoken sentence."""
+"""Web lookups (PRD 4 B-5): open a Google search, answer from the page in one spoken sentence.
+
+"search for X" / "google X" reads the top three results instead (short titles and the site), and so does a question
+whose answer isn't on the page; "open the second result" then opens that link and says in one line what is on it.
+"""
 import logging
 import re
-from urllib.parse import quote_plus
+import time
+from dataclasses import dataclass
+from urllib.parse import quote_plus, urlsplit
 
 import llm
+from youtube import NUMBER_WORDS, _short
 
 log = logging.getLogger("browser.lookup")
 
@@ -48,3 +55,65 @@ async def answer(question: str, page_text: str) -> str | None:
         except Exception as e:
             log.warning("answer failed, trying rules: %r", e)
     return regex_answer(question, page_text)
+
+
+# ---- the top results ------------------------------------------------------------
+
+TOP_N = 3
+
+RESULTS_JS = r"""(() => [...document.querySelectorAll('#search a[href^="http"]')].filter(a => a.querySelector('h3'))
+  .slice(0, 8).map(a => {
+    const box = a.closest('[data-hveid]');
+    const site = box && box.querySelector('span.VuuXrf');
+    return {title: a.querySelector('h3').innerText.trim(), href: a.href, site: site ? site.innerText.trim() : ''};
+  }))()"""
+
+
+@dataclass
+class Result:
+    title: str
+    site: str
+    href: str
+
+
+def _site(raw: dict) -> str:
+    """"Reddit · r/AskSF" -> "Reddit"; no name -> the host, "sf.eater.com"."""
+    name = re.split(r"\s+[·⋅|]\s+", raw.get("site", ""), maxsplit=1)[0].strip()
+    return name or (urlsplit(raw.get("href", "")).hostname or "").removeprefix("www.")
+
+
+def read_results(browser, timeout: float = 5.0) -> list[Result]:
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            rows = browser.evaluate(RESULTS_JS) or []
+        except Exception:
+            rows = []
+        if rows or time.monotonic() >= deadline:
+            break
+        time.sleep(0.25)
+    out, seen = [], set()
+    for r in rows:
+        if r.get("title") and r.get("href") and r["href"] not in seen:
+            seen.add(r["href"])
+            out.append(Result(r["title"], _site(r), r["href"]))
+    return out[:TOP_N]
+
+
+def describe(r: Result) -> str:
+    title = _short(r.title)
+    return f"{title}, from {r.site}" if r.site and r.site.lower() not in title.lower() else title
+
+
+def results_say(query: str, results: list[Result], lead: str = "") -> str:
+    if not results:
+        return f"I couldn't find anything on Google for {query}."
+    lines = " ".join(f"{NUMBER_WORDS[i].capitalize()}: {describe(r)}." for i, r in enumerate(results))
+    choices = ", ".join(NUMBER_WORDS[:len(results)])
+    choices = choices.rsplit(", ", 1)[0] + " or " + NUMBER_WORDS[len(results) - 1] if len(results) > 1 else choices
+    return f"{lead or f'Top results for {query}.'} {lines} Say open {choices}."
+
+
+def opened_say(r: Result, line: str) -> str:
+    head = f"Opened {r.site}" if r.site else f"Opened {_short(r.title)}"
+    return f"{head}. {line}".strip() if line else head + "."
