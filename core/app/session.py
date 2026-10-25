@@ -367,12 +367,12 @@ class Session:
         f = await self.turn_frame(turn)
         if f is None:
             return NO_FRAME
-        return self._describe_stream(f.jpeg_b64)
+        return self._describe_stream(f.jpeg_b64, text)
 
-    async def _describe_stream(self, jpeg_b64: str) -> AsyncIterator[str]:
+    async def _describe_stream(self, jpeg_b64: str, question: str = "") -> AsyncIterator[str]:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + config.VISION_TIMEOUT_S
-        it = vision.describe(jpeg_b64).__aiter__()
+        it = vision.describe(jpeg_b64, question).__aiter__()
         got = False
         try:
             while True:

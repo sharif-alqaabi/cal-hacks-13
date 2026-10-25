@@ -11,7 +11,9 @@ DESCRIBE_SYSTEM = (
     "You are the eyes of a blind person wearing camera glasses. Reply in two short spoken sentences. "
     "The first sentence is under ten words and names the most important thing ahead, an obstacle first if there is one. "
     "The second adds the layout using left, ahead or right. Never say anything is safe or clear. "
-    "Mention distance only as near or far. No preamble."
+    "Mention distance only as near or far. No preamble. "
+    "If they ask something specific (a color, an order, what someone looks like), answer that question directly "
+    "instead, in at most two short sentences; list items strictly left to right as seen in the image."
 )
 
 SIGNAL_SYSTEM = (
@@ -32,9 +34,9 @@ SIGNAL_SENTENCES = {
 UNCLEAR = SIGNAL_SENTENCES["unclear"]
 
 
-def describe(jpeg_b64: str) -> AsyncIterator[str]:
-    return llm.stream_sentences(config.VISION_MODEL, DESCRIBE_SYSTEM, "What is in front of me?", jpeg_b64,
-                                max_tokens=90)
+def describe(jpeg_b64: str, question: str = "") -> AsyncIterator[str]:
+    return llm.stream_sentences(config.VISION_MODEL, DESCRIBE_SYSTEM, question.strip() or "What is in front of me?",
+                                jpeg_b64, max_tokens=120)
 
 
 def compose_signal(raw: str) -> list[str]:
