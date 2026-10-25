@@ -185,6 +185,21 @@ def test_mock_files() -> None:
         assert q["q"] and ("expect" in q or re.compile(q["expect_regex"]))
 
 
+def test_pick() -> None:
+    from types import SimpleNamespace as Hit
+    assert service.content_words("Where are my keys?") == {"key"}
+    assert service.content_words("the black framed glasses") == {"black", "framed", "glasse"}  # same stem as "glasses"
+    keyboard = moment(NOON, {**CAP, "objects": [{**CAP["objects"][0], "name": "keyboard"}]})
+    keys = moment(NOON - MIN, CAP)  # CAP's object is "keys"
+    strong = [(Hit(id=f"{keyboard['id']}:o0", score=0.79), keyboard), (Hit(id=f"{keys['id']}:o0", score=0.40), keys)]
+    doc, m, named = service.pick("where are my keys", strong)
+    assert m is keys and named == [strong[1]], "a word match beats a higher score"
+    doc, m, named = service.pick("where is my piano", strong)
+    assert m is keyboard and named == [], "no word match: still the best hit, but not template-eligible"
+    sam = moment(NOON, CAP)
+    assert service.pick("what was Sam wearing", [(Hit(id=f"{sam['id']}:p0", score=0.8), sam)])[2], "people match by name"
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:

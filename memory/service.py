@@ -149,6 +149,44 @@ def last_unnamed(moments: list[dict], ids: set[int] | None = None) -> tuple[dict
     return None
 
 
+STOP = {"a", "an", "the", "of", "my", "your", "is", "are", "was", "were", "where", "what", "who", "did", "do", "i",
+        "in", "on", "at", "to", "and", "or", "with", "it", "that", "this", "for", "by", "from", "last", "see", "saw"}
+
+
+def content_words(text: str) -> set[str]:
+    """'Where are my keys?' -> {'key'}: lowercase, no filler words, a plural 's' dropped so 'key' meets 'keys'."""
+    out = set()
+    for w in re.findall(r"[a-z0-9]+", text.lower()):
+        if w not in STOP:
+            out.add(w[:-1] if len(w) > 3 and w.endswith("s") and not w.endswith("ss") else w)
+    return out
+
+
+def hit_name(doc, moment: dict) -> str:
+    """What a hit is about: the object's name, the person's name, or the remembered item. '' for a scene."""
+    _, kind, idx = parse_ref(doc.id)
+    c = json.loads(moment["caption_json"])
+    if kind == "o":
+        return known(c["objects"][idx].get("name"))
+    if kind == "p":
+        return known(c["people"][idx].get("name"))
+    return known((c.get("fact") or {}).get("item")) if kind == "fact" else ""
+
+
+def pick(question: str, strong: list) -> tuple:
+    """The hit to answer from, out of (doc, moment) pairs that cleared MIN_SCORE. Hits whose name shares a word with
+    the question come first: a score alone ranked keyboards over "keys" (0.79) and matched a never-seen piano to a
+    keyboard (0.52). Returns (doc, moment, named): named is the word-matched hits, [] when none, and only a named
+    hit may be answered from a template."""
+    q = content_words(question)
+    named = [x for x in strong if content_words(hit_name(*x)) & q]
+    pool = named or strong
+    top = max(d.score for d, _ in pool)
+    # Among the near-best hits (the same thing seen several times) trust the most recent.
+    doc, moment = max((x for x in pool if x[0].score >= top - 0.08), key=lambda x: x[1]["ts"])
+    return doc, moment, named
+
+
 def to_second_person(statement: str) -> str:
     """'I put my wallet on the shelf' -> 'you put your wallet on the shelf' (the wearer hears it, so it's 'you')."""
     for first, second in ((r"\bI'm\b", "you're"), (r"\bI've\b", "you've"), (r"\bI'll\b", "you'll"), (r"\bI\b", "you"),
@@ -346,17 +384,16 @@ class Service:
             # Visual and "just" questions also send the saved frames: a caption was written before anyone asked.
             # Others with no strong hit stay "not seen" without a call (e2e: a never-seen umbrella got "the closest is a raincoat").
             shots = self._frames(question, docs, now_ms) if VISUAL.search(question) or JUST.search(question) else []
-            answer, tpl = None, None
+            answer, tpl, named = None, None, []
             if strong:
-                top = max(d.score for d, _ in strong)
-                # Among the near-best hits (the same thing seen several times) trust the most recent.
-                doc, best = max((x for x in strong if x[0].score >= top - 0.08), key=lambda x: x[1]["ts"])
+                doc, best, named = pick(question, strong)
                 _, kind, idx = parse_ref(doc.id)
-                tpl = template(best, kind, idx, now_ms)
+                tpl = template(best, kind, idx, now_ms) if named else None  # no word match: Claude decides if it was seen
                 if tpl and doc.score >= FAST_SCORE and not shots:
                     answer = tpl
             if answer is None:
-                entries = [self._entry(d, m, now_ms) for d, m in sorted(strong[:5], key=lambda x: -x[1]["ts"])]
+                ranked = named + [x for x in strong if x not in named]  # word-matched hits first, then by score
+                entries = [self._entry(d, m, now_ms) for d, m in sorted(ranked[:5], key=lambda x: -x[1]["ts"])]
                 try:
                     answer, picked = await self._ask(question, entries, shots)
                 except Exception as e:
