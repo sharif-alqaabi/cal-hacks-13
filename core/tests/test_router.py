@@ -101,6 +101,19 @@ def test_sites_go_to_browser(fake):
     assert [t for t in NOT_SITES if router.SITE_RX.match(t.lower())] == []
 
 
+def test_who_is_this_goes_to_recall_before_jev(fake, monkeypatch):
+    # Jev or Claude reading "who's this" as a look at the scene would never name anyone: memory matches the face.
+    async def wrong(text, pending_confirm=False):
+        return "describe", 0.99
+    monkeypatch.setattr(router, "jev_route", wrong)
+    for t in ("who is this", "who's this", "who is this person", "who's that", "who is in front of me",
+              "who's in front of me", "who am I looking at", "do you recognize this person", "do you know who this is",
+              "who am I talking to", "who is standing next to me"):
+        assert router.face_now_question(t), t
+        assert asyncio.run(router.route(t))[:2] == ("recall", "keywords"), t
+    for t in ("who was that", "who did I meet earlier", "who is this email from", "this is my brother Sam"):
+        assert not router.face_now_question(t), t
+
 def test_youtube_controls_short_circuit(fake):
     for text in ["pause", "play number two", "play lofi music on YouTube"]:
         intent, source, _ = asyncio.run(router.route(text))

@@ -49,9 +49,12 @@ FOLLOW = re.compile(r"^(?:and|also|so|what about|how about|what else|who else)\b
 FOLLOW_S = 90
 # Present-tense "who is this": match the live frame core sends, not a saved recall photo.
 FACE_PAST = re.compile(r"\b(?:was|were|did|didn'?t|earlier|ago|yesterday|last|met|wearing|wore)\b", re.I)
+FACE_NOT = re.compile(r"\b(?:e-?mails?|messages?|texts?|calls?|calling|videos?|songs?)\b", re.I)  # "who is this email from"
 FACE_NOW = re.compile(
     r"\bwho\s*(?:is|'?s)\s+(?:this|that|he|she|they|him|her)\b|"
-    r"\bwho am i looking at\b|"
+    r"\bwho\s*(?:is|'?s|are)\s+(?:(?:standing|sitting|walking)\s+)?(?:in front of|next to|beside|with|talking to)\s+me\b|"
+    r"\bwho am i (?:looking at|talking (?:to|with)|with|facing)\b|"
+    r"\bdo you (?:know|recogni[sz]e)\s+(?:who (?:this|that|he|she) is|this (?:person|guy|face|man|woman)|him|her|them)\b|"
     r"\brecogni[sz]e\s+(?:him|her|them|this(?:\s+(?:face|person))?)\b",
     re.I,
 )
@@ -66,7 +69,7 @@ PLACE_NAME = {"home": "home", "office": "the office", "store": "the store"}
 def face_now_question(question: str) -> bool:
     """True when the wearer wants to know who is in view now, not who they saw earlier."""
     q = question.lower().replace("’", "'")
-    return bool(FACE_NOW.search(q)) and not FACE_PAST.search(q)
+    return bool(FACE_NOW.search(q)) and not FACE_PAST.search(q) and not FACE_NOT.search(q)
 
 
 def face_answer(seen: list[tuple[str, float, str]]) -> str:
@@ -578,6 +581,8 @@ class Service:
     async def _faces_in(self, jpeg_b64: str) -> list[tuple[str, float, str]]:
         """Introduced people recognised by face in this frame, [] while the models load or if none is enrolled."""
         if not self.faces.ready or not self.faces.enrolled:
+            log.warning("faces: can't match, %s", "nobody introduced yet" if self.faces.ready else
+                        "face recognition is off (OpenCV or the models missing, see the 'faces:' line at startup)")
             return []
         try:
             return await asyncio.to_thread(self.faces.match, base64.b64decode(jpeg_b64))

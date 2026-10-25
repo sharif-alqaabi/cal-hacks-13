@@ -66,6 +66,25 @@ WEB_RX = re.compile(
 # "did the walk sign turn on" and "this is Sam, I saw him earlier" keep their own intents.
 PAST = re.compile(r"\b(did|didn'?t|was|wasn'?t|were|weren'?t|had|saw|seen|earlier|ago|yesterday|last (time|night|week))\b")
 PAST_OVERRIDES = {"describe", "other", "recall"}
+# Present-tense "who is this": always memory, which matches the live frame against introduced faces. Same patterns
+# as memory/service.py, which decides there whether to match the frame.
+FACE_PAST = re.compile(r"\b(?:was|were|did|didn'?t|earlier|ago|yesterday|last|met|wearing|wore)\b", re.I)
+FACE_NOT = re.compile(r"\b(?:e-?mails?|messages?|texts?|calls?|calling|videos?|songs?)\b", re.I)  # "who is this email from"
+FACE_NOW = re.compile(
+    r"\bwho\s*(?:is|'?s)\s+(?:this|that|he|she|they|him|her)\b|"
+    r"\bwho\s*(?:is|'?s|are)\s+(?:(?:standing|sitting|walking)\s+)?(?:in front of|next to|beside|with|talking to)\s+me\b|"
+    r"\bwho am i (?:looking at|talking (?:to|with)|with|facing)\b|"
+    r"\bdo you (?:know|recogni[sz]e)\s+(?:who (?:this|that|he|she) is|this (?:person|guy|face|man|woman)|him|her|them)\b|"
+    r"\brecogni[sz]e\s+(?:him|her|them|this(?:\s+(?:face|person))?)\b",
+    re.I,
+)
+
+
+def face_now_question(question: str) -> bool:
+    """True when the wearer wants to know who is in view now, not who they saw earlier."""
+    q = question.lower().replace("’", "'")
+    return bool(FACE_NOW.search(q)) and not FACE_PAST.search(q) and not FACE_NOT.search(q)
+
 
 JEV_CRITERIA = {
     "describe": "Wants to know what is around or in front of them right now, in the present ('what's in front of me?'). Never a question about earlier",
@@ -158,6 +177,8 @@ async def route(text: str, pending_confirm: bool = False) -> tuple[str, str, int
     said = text.lower().replace("’", "'").strip().rstrip(".!?")
     if YOUTUBE_RX.search(said) or SITE_RX.match(said) or WEB_RX.match(said):
         return done("browser", "keywords")
+    if face_now_question(text):  # a classifier can read "who's this" as a look at the scene, which never names anyone
+        return done("recall", "keywords")
     # Past tense goes straight to memory, without waiting on Jev: the camera can't answer about earlier.
     if hint in PAST_OVERRIDES and PAST.search(text.lower().replace("’", "'")):
         return done("recall", "tense")

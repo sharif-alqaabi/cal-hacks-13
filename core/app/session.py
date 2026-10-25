@@ -42,18 +42,7 @@ FIXED_PHRASES = [WORKING, REMEMBERED, NOT_REMEMBERED, FAMILY_TOLD, FAMILY_DOWN, 
 
 
 FRAME_INTENTS = {"describe", "signal", "task"}   # handlers that send a fresh snap to a model
-_FACE_PAST = re.compile(r"\b(?:was|were|did|didn'?t|earlier|ago|yesterday|last|met|wearing|wore)\b", re.I)
-_FACE_NOW = re.compile(
-    r"\bwho\s*(?:is|'?s)\s+(?:this|that|he|she|they|him|her)\b|"
-    r"\bwho am i looking at\b|"
-    r"\brecogni[sz]e\s+(?:him|her|them|this(?:\s+(?:face|person))?)\b",
-    re.I,
-)
-
-
-def face_now_question(text: str) -> bool:
-    q = text.lower().replace("’", "'")
-    return bool(_FACE_NOW.search(q)) and not _FACE_PAST.search(q)
+face_now_question = router.face_now_question  # "who is this": match the live frame against enrolled faces
 
 
 class Verbatim(str):
