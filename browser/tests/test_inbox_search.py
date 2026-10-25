@@ -66,8 +66,15 @@ def test_search_then_open_a_result():
     assert run("open the third result").startswith("Opened example.com")
 
 
-def test_pick_without_search_is_youtube():
-    assert run("open the second result") == "Ask me to find videos first, then pick one."
+def test_pick_without_any_list():
+    assert run("open the second result") == "Search for something first, then pick a result."
+
+
+def test_results_still_open_after_the_tab_was_replaced():
+    run("search for Ace Hardware Polk")
+    run("go to Instagram")
+    assert run("open the second result").startswith("Opened Yelp.")
+    assert runner.store.current.browser.url == "https://www.yelp.com/biz/ace-polk"
 
 
 def test_question_keeps_answer_and_results():

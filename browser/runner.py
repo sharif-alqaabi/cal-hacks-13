@@ -223,7 +223,13 @@ def _start(task_id: str, url: str, goal: str, site: str):
     if not config.FAKE and not config.TYPESAFE_API_KEY:
         raise Failed(NO_KEYS)
     try:
-        agent = agents.make_agent(url, goal)
+        try:
+            agent = agents.make_agent(url, goal)
+        except Exception as e:   # Chrome sometimes drops the first call on a brand-new tab: one retry
+            if "key" in str(e).lower():
+                raise
+            log.warning("opening the tab failed, retrying once: %r", e)
+            agent = agents.make_agent(url, goal)
     except Exception as e:
         log.exception("could not start agent")
         raise Failed(_error_say(f"{type(e).__name__}: {e}") if "key" in str(e).lower() else f"I couldn't open {site} in Chrome.")
@@ -265,6 +271,7 @@ _search: dict = {"agent": None, "results": [], "query": ""}   # the Google tab a
 def lookup_results(task_id: str, agent, query: str, wait_s: float = 5.0) -> list:
     results = lookup.read_results(agent.browser, timeout=wait_s)
     _search.update(agent=agent, results=results, query=query)
+    _yt["results"] = []
     tracelog.emit(task_id, "read", " | ".join(f"{r.title} ({r.site})" for r in results) or "(no results)")
     return results
 
@@ -277,11 +284,17 @@ def _search_agent():
 def search_pick(task_id: str, pick: int):
     """"open the second result": open that link in the search tab and read the page. Never clicks anything."""
     agent, results = _search_agent(), _search["results"]
-    if agent is None or not results:
-        raise Failed("Ask me to search for something first, then pick a result.")
+    if not results:
+        raise Failed("Search for something first, then pick a result.")
     if pick > len(results):
         raise Failed(f"There were only {len(results)} results.")
     r = results[pick - 1]
+    if agent is None:   # the search tab was replaced (a website, an email): the links still work
+        agent = _start(task_id, r.href, sites.goal(sites.SitePlan(r.href, r.site)), r.site or "that page")
+        _search["agent"] = agent
+        page = sites.read(agent.browser, fallback=agent.state.get("page"))
+        tracelog.emit(task_id, "read", f"{page.get('title') or '(no title)'} | {page.get('url', '')}")
+        return r, page
     tracelog.emit(task_id, "act", f"open result {pick}: {r.href}")
     sites.open_site(agent.browser, r.href)
     page = sites.read(agent.browser, fallback=agent.state.get("page"))
@@ -357,6 +370,7 @@ def youtube_run(task_id: str, plan: youtube.YouTubePlan) -> str:
     if plan.action == "play":
         return _yt_play(task_id, agent, videos[0])
     _yt["results"] = videos
+    _search["results"] = []
     return youtube.results_say(query, videos)
 
 
@@ -529,7 +543,8 @@ async def run_task(goal: str) -> dict:
         if isinstance(plan, goals.Unsupported):
             tracelog.emit(task_id, "fail", plan.say)
             return _reply(task_id, plan.say)
-        if isinstance(plan, goals.YouTubePlan) and plan.action == "pick" and _search_agent() is not None:
+        if isinstance(plan, goals.YouTubePlan) and plan.action == "pick" and not (_yt_agent() and _yt["results"]) \
+                and (_search["results"] or _yt_agent() is None):
             tracelog.emit(task_id, "plan", f"Open search result {plan.pick}")   # "open the second result"
             r, page = await _in_browser(search_pick, task_id, plan.pick, timeout=deadline - time.monotonic() + 4)
             say = lookup.opened_say(r, await sites.summary(page))

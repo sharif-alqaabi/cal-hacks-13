@@ -23,4 +23,7 @@ def fake_env(monkeypatch, tmp_path):
     runner.store.pending.clear()
     runner.store.current = None
     runner.store.kept.clear()
+    runner._search.update(agent=None, results=[], query="")
+    runner._yt.update(agent=None, results=[])
+    runner._mail.update(agent=None, mails=[], listed=[])
     yield
