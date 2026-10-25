@@ -110,7 +110,8 @@ def test_youtube_controls_short_circuit(fake):
 WEB = ["any new emails?", "do I have any new emails", "read my inbox", "check my email", "read me my new emails",
        "read the one from Sam", "read the email from Sam", "search for best tacos in San Francisco",
        "google Cal Hacks judging", "open the second result", "open the first link", "click on second result",
-       "open the second website", "go to the second one", "click the second link", "open result number two", "click two"]
+       "open the second website", "go to the second one", "click the second link", "open result number two", "click two",
+       "first one", "the first one", "number one", "the second result", "what about the first one"]
 
 
 def test_inbox_and_search_short_circuit(fake):

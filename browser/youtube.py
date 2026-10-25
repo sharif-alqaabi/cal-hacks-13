@@ -28,7 +28,7 @@ ORDINALS = {"one": 1, "1": 1, "first": 1, "top": 1, "two": 2, "2": 2, "second": 
 PAUSE_RX = re.compile(LEAD + r"(?:pause|stop)(?: (?:it|that|the video|the music|youtube|playing|the youtube video))?" + TAIL, re.I)
 RESUME_RX = re.compile(LEAD + r"(?:resume|unpause|keep playing|continue(?: playing| the video)?|play|play it|"
                        r"start it again|keep going)(?: (?:it|the video|again))?" + TAIL, re.I)
-PICK_VERB = (r"(?:play|pick|choose|open(?: up)?|watch|go with|click(?: on)?|tap(?: on)?|press|select|go to|go into|"
+PICK_VERB = (r"(?:what about |how about |and |now |then |ok |okay )?(?:play|pick|choose|open(?: up)?|watch|go with|click(?: on)?|tap(?: on)?|press|select|go to|go into|"
              r"take me to|pull up|show me)?\s*")
 PICK_NOUN = r"(?:one|video|result|search result|link|website|web ?site|site|page|article|option)"
 N = r"(?P<n>one|two|three|1|2|3|first|second|third|top|last)"

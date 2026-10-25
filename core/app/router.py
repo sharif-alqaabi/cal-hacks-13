@@ -55,7 +55,9 @@ WEB_RX = re.compile(
     r"|(?:open(?: up)?|click(?: on)?|tap(?: on)?|press|select|go to|go into|take me to|pull up|show me) (?:the )?"
     r"(?:(?:number )?(?:one|two|three|1|2|3|first|second|third|top|last) (?:one|result|search result|link|website|web ?site|site|page|article|option)"
     r"|(?:result|link|website|option) (?:number )?(?:one|two|three|1|2|3|first|second|third|top|last))(?: please)?$"
-    r"|(?:click|tap)(?: on)? (?:the )?(?:number )?(?:one|two|three|1|2|3|first|second|third|top|last)(?: one)?$)")
+    r"|(?:click|tap)(?: on)? (?:the )?(?:number )?(?:one|two|three|1|2|3|first|second|third|top|last)(?: one)?$"
+    r"|(?:what about |how about |and |now |then )?(?:the )?(?:number (?:one|two|three|1|2|3)|(?:first|second|third|last)(?: one)?|"
+    r"(?:first|second|third|last|top) (?:result|link|website|site|video))(?: please)?$)")
 
 # Past-tense wording means the answer is in memory, not in the camera ("what color was the car", "have you seen my
 # wallet", "did I leave the stove on"). Only overrides describe/other/recall, so "email Sam that I left 5 minutes ago",
